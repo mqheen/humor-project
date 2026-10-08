@@ -67,9 +67,8 @@ export default function ProfilePage() {
     return (
         <main className="center-screen">
             <div className="panel" style={{ width: '100%', maxWidth: 440 }}>
-                <p className="eyebrow">Your profile</p>
-                <h1 style={{ margin: '0 0 0.35rem', fontSize: '1.75rem', letterSpacing: '-0.02em' }}>Tell us about you</h1>
-                <p className="muted" style={{ margin: '0 0 1.75rem' }}>Your name and photo show up on your dashboard.</p>
+                <h1 className="panel-title">Tell us about you</h1>
+                <p className="panel-lede">Your name and photo show up on your dashboard.</p>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.1rem', marginBottom: '1.75rem' }}>
                     <div className="avatar">
@@ -77,7 +76,7 @@ export default function ProfilePage() {
                     </div>
                     <label className="btn" style={{ cursor: 'pointer' }}>
                         {uploading ? 'Uploading…' : 'Upload photo'}
-                        <input type="file" accept="image/*" onChange={handleAvatarUpload} disabled={uploading} style={{ display: 'none' }} />
+                        <input type="file" accept="image/*" onChange={handleAvatarUpload} disabled={uploading} className="sr-only" />
                     </label>
                 </div>
 

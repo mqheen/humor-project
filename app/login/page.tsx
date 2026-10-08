@@ -15,10 +15,9 @@ export default function LoginPage() {
     return (
         <main className="center-screen">
             <div className="panel" style={{ width: '100%', maxWidth: 400, textAlign: 'center' }}>
-                <p className="eyebrow">Welcome back</p>
-                <h1 style={{ margin: '0 0 0.5rem', fontSize: '1.75rem', letterSpacing: '-0.02em' }}>Sign in</h1>
-                <p className="muted" style={{ margin: '0 0 1.75rem' }}>Use your Google account to continue.</p>
-                <button onClick={signInWithGoogle} className="btn btn-block btn-lg" style={{ background: '#fff', color: '#111', borderColor: '#fff' }}>
+                <h1 className="panel-title">Sign in</h1>
+                <p className="panel-lede" style={{ marginInline: 'auto' }}>Use your Google account to continue.</p>
+                <button onClick={signInWithGoogle} className="btn btn-block btn-lg">
                     <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
                         <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.5 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.3l7.8 6C12.3 13.5 17.7 9.5 24 9.5z"/>
                         <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4 7.1-10 7.1-17.5z"/>
