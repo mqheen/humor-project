@@ -37,7 +37,7 @@ h1, h2, h3, .display {
 }
 p { max-width: 70ch; }
 a { color: inherit; }
-button, input { font: inherit; color: inherit; }
+button, input, select { font: inherit; color: inherit; }
 .container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; }
 .muted { color: var(--muted-ink); }
 
@@ -55,7 +55,8 @@ button, input { font: inherit; color: inherit; }
 /* One bar for all links; Nav.tsx measures the active link and moves it. */
 .nav-links { position: relative; }
 .nav-bar { position: absolute; left: 0; bottom: 0.05rem; width: 22px; height: 4px; border-radius: 2px; background: var(--red); opacity: 0; pointer-events: none; }
-.nav-auth { margin-left: auto; }
+.nav-auth { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; }
+.nav-streak { display: inline-flex; align-items: center; gap: 0.3rem; text-decoration: none; font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.03em; }
 
 /* Buttons */
 .btn {
@@ -110,6 +111,36 @@ button, input { font: inherit; color: inherit; }
 .sign h1 { font-size: clamp(2.6rem, 7vw, 4.5rem); margin: 0 0 0.9rem; }
 .sign p { font-size: 1.1rem; margin: 0; color: var(--muted-ink); }
 .sign-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-top: 1.5rem; }
+.text-link { font-weight: 700; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.text-link:hover { text-decoration-color: var(--red); }
+
+/* Homepage sign: headline left, Cat of the Day flyer right (stacks on phones) */
+.sign-wide { max-width: none; }
+.sign-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 290px); gap: 2rem 2.5rem; align-items: center; }
+.sign-wide h1 { font-size: clamp(2.3rem, 5.5vw, 3.8rem); }
+.sign .card.cotd { transform: rotate(1.5deg); }
+.cotd::before { display: none; } /* the label stands in for the tape */
+.cotd .card-name { font-size: 1.25rem; }
+.cotd-label {
+  position: absolute; top: -0.85rem; left: 50%; z-index: 1; white-space: nowrap;
+  padding: 0.15rem 0.55rem; background: var(--red); border: 1.5px solid var(--ink); border-radius: 6px;
+  font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 0.8rem; transform: translateX(-50%) rotate(-2deg);
+}
+.cotd-score { font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.15rem; letter-spacing: -0.03em; }
+.sign .cat-tip { font-size: 0.92rem; color: var(--ink); }
+
+/* Feed controls: neighborhood chips + New/Top */
+.feed-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.5rem; margin-top: 1.5rem; }
+.chips { flex: 1; min-width: 0; display: flex; gap: 0.6rem; overflow-x: auto; padding: 0.45rem 0.25rem 0.6rem; scrollbar-width: thin; }
+.chip {
+  flex-shrink: 0; padding: 0.3rem 0.7rem; background: var(--butter); color: var(--ink); text-decoration: none; white-space: nowrap;
+  border: 1.5px solid var(--ink); border-radius: 6px; font-size: 0.88rem; font-weight: 700;
+  transform: rotate(-1.5deg);
+}
+.chip:nth-child(even) { transform: rotate(1deg); }
+.chip:hover { background: var(--stripe); }
+.chip.active { background: var(--red); box-shadow: 2px 2px 0 var(--ink); }
+.feed-bar + .grid { padding-top: 1.75rem; }
 
 /* Price sticker chips */
 .sticker {
@@ -147,8 +178,15 @@ button, input { font: inherit; color: inherit; }
 .card-name { margin: 0; font-size: 1.45rem; }
 .card-meta { font-size: 0.9rem; color: var(--muted-ink); white-space: nowrap; }
 .card-bio { margin: 0.8rem 0 0.9rem; font-size: 0.95rem; line-height: 1.55; color: var(--muted-ink); }
-.card-body > .card-bio:last-child { margin-bottom: 0; }
-.poster { display: flex; align-items: center; gap: 0.5rem; padding-top: 0.75rem; border-top: 1.5px dashed var(--rule); font-size: 0.85rem; color: var(--muted-ink); }
+.card-body > .card-bio:last-child, .card-body > .cat-tip:last-child { margin-bottom: 0; }
+.kind-tag { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-ink); }
+.title-badge { padding: 0.05rem 0.45rem; border: 1.5px solid var(--ink); border-radius: 999px; background: var(--mint); color: var(--ink); font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+
+/* Cat's tip: paw bullet, display font */
+.cat-tip { display: flex; align-items: flex-start; gap: 0.5rem; margin: 0 0 0.9rem; font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 0.95rem; line-height: 1.4; }
+.cat-tip-paw { flex-shrink: 0; margin-top: 0.15em; }
+.cat-tip-label { color: var(--red); -webkit-text-stroke: 0.2px var(--ink); }
+.poster { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding-top: 0.75rem; border-top: 1.5px dashed var(--rule); font-size: 0.85rem; color: var(--muted-ink); }
 
 /* Votes */
 .votes { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; flex-shrink: 0; }
@@ -189,6 +227,10 @@ button, input { font: inherit; color: inherit; }
 .dropzone:hover { background: var(--stripe); }
 .dropzone:focus-within { outline: 2px solid var(--red); outline-offset: 3px; }
 .dropzone small { font-weight: 400; font-size: 0.88rem; color: var(--muted-ink); }
+.photo-print.photo-developing { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; aspect-ratio: 4 / 3; background: var(--stripe); font-weight: 700; }
+.tabs { display: flex; margin-bottom: 1.5rem; }
+.tabs .seg { flex: 1; text-align: center; padding: 0.6rem 0.9rem; }
+select.input { appearance: none; padding-right: 2.5rem; cursor: pointer; background: var(--paper) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%2326211F' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 1rem center; }
 .dropzone img { width: 100%; max-height: 360px; object-fit: cover; display: block; }
 /* The real file input covers the zone so native drag-and-drop works. */
 .dropzone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
@@ -218,12 +260,41 @@ button, input { font: inherit; color: inherit; }
 .stat-value { margin: 0; font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.8rem; letter-spacing: -0.03em; line-height: 1.1; }
 .section-title { margin: 3rem 0 0.5rem; font-size: 1.7rem; }
 
+/* Bodega loyalty card */
+.loyalty { margin-top: 2rem; background: var(--butter); }
+.loyalty-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
+.loyalty-title { margin: 0; font-size: 1.6rem; }
+.loyalty .sticker { background: var(--paper); }
+.loyalty-punches { list-style: none; margin: 0 0 1rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.punch { width: 40px; height: 40px; border-radius: 50%; border: 1.5px dashed var(--ink); background: var(--paper); display: grid; place-items: center; }
+.punch.punched { border-style: solid; }
+.punch-more { align-self: center; font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.2rem; }
+.loyalty-text { margin: 0 0 0.25rem; }
+.loyalty-text .muted { color: var(--ink); }
+.loyalty-hint { margin: 0; font-size: 0.88rem; }
+
+/* Daily stamp popup: a flyer over dimmed paper */
+.stamp-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 1rem; background: rgba(232, 220, 207, 0.85); }
+.stamp-panel { width: min(100%, 420px); text-align: center; }
+.stamp-label { margin: 0 auto 0.35rem; }
+.stamp-title { margin: 0 0 1.25rem; font-size: clamp(2.6rem, 10vw, 3.6rem); }
+.stamp-new { position: absolute; top: -0.85rem; right: -0.6rem; transform: rotate(6deg); box-shadow: 2px 2px 0 var(--ink); }
+.stamp-panel .loyalty-punches { justify-content: center; flex-wrap: nowrap; gap: 0.3rem; }
+.stamp-panel .punch { width: clamp(22px, 6.6vw, 30px); height: clamp(22px, 6.6vw, 30px); }
+.stamp-panel .punch svg { width: 62%; height: 62%; }
+.stamp-text { margin: 0 auto 1.5rem; }
+
 /* Phones */
 @media (max-width: 640px) {
   .nav-links { order: 3; flex-basis: 100%; overflow-x: auto; margin: 0 -0.7rem; }
   .sign { margin-top: -2.25rem; padding: 1.75rem 1.25rem 1.5rem; box-shadow: 4px 4px 0 var(--ink); }
   .sign::before, .sign::after { top: 9px; }
   .sign p { font-size: 1rem; }
+  .sign-split { grid-template-columns: minmax(0, 1fr); }
+  .sign .card.cotd { max-width: 320px; margin: 0.75rem auto 0.25rem; transform: rotate(1deg); }
+  .loyalty-punches { gap: 0.35rem; }
+  .punch { width: 26px; height: 26px; }
+  .punch svg { width: 16px; height: 16px; }
   .panel { padding: 1.5rem 1.25rem; }
   .center-screen { padding: 2rem 1rem; }
   .card:nth-child(n) { transform: rotate(0deg); }
@@ -270,6 +341,12 @@ button, input { font: inherit; color: inherit; }
   @keyframes walk-1 { 0% { opacity: 0; } 8%, 88% { opacity: 1; } 100% { opacity: 0; } }
   @keyframes walk-2 { 0%, 22% { opacity: 0; } 30%, 88% { opacity: 1; } 100% { opacity: 0; } }
   @keyframes walk-3 { 0%, 44% { opacity: 0; } 52%, 88% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* Daily stamp: backdrop fades, panel drops like the sign, then the newest paw stamps in */
+  .stamp-backdrop { animation: stamp-fade 150ms ease-out both; }
+  .stamp-panel { animation: sign-drop 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .punch-new > svg, .punch-more.punch-new { animation: stamp-fade 1ms 420ms both, paw-stamp 220ms cubic-bezier(0.2, 0.9, 0.3, 1) 420ms both; }
+  @keyframes stamp-fade { from { opacity: 0; } to { opacity: 1; } }
 
   /* Nav bar slides between links (.ready is added after the first placement) */
   .nav-bar.ready { transition: transform 220ms ease-out, width 220ms ease-out; }

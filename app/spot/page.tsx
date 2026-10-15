@@ -1,21 +1,44 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/app/lib/supabase/client';
+import { NEIGHBORHOODS, VIBES } from '@/app/lib/nyc';
+import PawIcon from '@/app/components/PawIcon';
+import CatTip from '@/app/components/CatTip';
 
-type Generation = { id: number; image_url: string; cat_name: string; bio: string; location: string | null };
+type Generation = {
+    id: number; image_url: string; cat_name: string; bio: string; location: string | null;
+    kind: 'spotted' | 'generated'; neighborhood: string | null; tip: string | null;
+};
 
 export default function SpotPage() {
+    return (
+        <Suspense>
+            <Spot />
+        </Suspense>
+    );
+}
+
+function Spot() {
     const supabase = createClient();
     const router = useRouter();
-    const [file, setFile] = useState<File | null>(null);
-    const [preview, setPreview] = useState('');
-    const [location, setLocation] = useState('');
+    const tab = useSearchParams().get('tab') === 'spot' ? 'spot' : 'make';
     const [status, setStatus] = useState<'idle' | 'uploading' | 'generating'>('idle');
     const [error, setError] = useState('');
     const [result, setResult] = useState<Generation | null>(null);
+
+    // Spot a cat
+    const [file, setFile] = useState<File | null>(null);
+    const [preview, setPreview] = useState('');
+    const [location, setLocation] = useState('');
+    const [spotHood, setSpotHood] = useState('');
+
+    // Make a cat
+    const [hood, setHood] = useState('');
+    const [vibe, setVibe] = useState('');
+    const [extra, setExtra] = useState('');
 
     useEffect(() => {
         supabase.auth.getUser().then(({ data }) => {
@@ -32,7 +55,21 @@ export default function SpotPage() {
         setError('');
     };
 
-    const generate = async () => {
+    const callGenerate = async (payload: object) => {
+        setStatus('generating');
+        const res = await fetch('/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (!res.ok) { setError(json.error || 'Something went wrong.'); setStatus('idle'); return; }
+
+        setResult(json);
+        setStatus('idle');
+    };
+
+    const spot = async () => {
         if (!file) return;
         setError('');
         setStatus('uploading');
@@ -45,64 +82,104 @@ export default function SpotPage() {
         if (upErr) { setError(upErr.message); setStatus('idle'); return; }
 
         const { data: pub } = supabase.storage.from('spots').getPublicUrl(path);
+        await callGenerate({ imageUrl: pub.publicUrl, location, neighborhood: spotHood || null });
+    };
 
-        setStatus('generating');
-        const res = await fetch('/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageUrl: pub.publicUrl, location }),
-        });
-        const json = await res.json();
-        if (!res.ok) { setError(json.error || 'Something went wrong.'); setStatus('idle'); return; }
-
-        setResult(json);
-        setStatus('idle');
+    const make = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!hood || !vibe) return;
+        setError('');
+        await callGenerate({ kind: 'generated', neighborhood: hood, vibe, extra });
     };
 
     const reset = () => {
-        setFile(null); setPreview(''); setLocation(''); setResult(null); setError('');
+        setFile(null); setPreview(''); setLocation(''); setSpotHood('');
+        setExtra('');
+        setResult(null); setError('');
     };
+
+    const busy = status !== 'idle';
 
     return (
         <main className="center-screen">
             <div className="panel" style={{ width: '100%', maxWidth: 520 }}>
-                {!result ? (
-                    <>
-                        <h1 className="panel-title">Saw a cat? Post it.</h1>
-                        <p className="panel-lede">Upload a photo and the AI will give it a name and a New York backstory. The city votes on the best ones.</p>
-
-                        <label className="dropzone">
-                            {preview ? <img src={preview} alt="Preview" /> : (
-                                <>
-                                    <PawIcon size={40} fill="var(--butter)" stroke="var(--ink)" />
-                                    <span>Drop a cat here</span>
-                                    <small>or click to choose a photo</small>
-                                </>
-                            )}
-                            <input type="file" accept="image/*" onChange={onFile} aria-label="Cat photo" />
-                        </label>
-
-                        <label className="field" style={{ marginTop: '1.1rem' }}>
-                            <span>Where did you see it? <em className="muted">(optional)</em></span>
-                            <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Bodega on 110th & Amsterdam" />
-                        </label>
-
-                        {error && <p className="error" role="alert">{error}</p>}
-
-                        <button onClick={generate} disabled={!file || status !== 'idle'} className="btn btn-primary btn-block">
-                            {status === 'uploading' ? 'Uploading…' : status === 'generating' ? <WalkingPaws /> : 'Generate bio'}
-                        </button>
-                    </>
+                {result ? (
+                    <Result result={result} onReset={reset} />
                 ) : (
                     <>
-                        <h1 className="panel-title" style={{ marginBottom: '1rem' }}>Meet {result.cat_name}</h1>
-                        <img src={result.image_url} alt={result.cat_name} className="photo-print" />
-                        {result.location && <p style={{ margin: '0 0 0.75rem' }}><span className="sticker">{result.location}</span></p>}
-                        <TypedBio key={result.id} text={result.bio} />
-                        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                            <Link href="/" className="btn btn-primary" style={{ flex: 1 }}>See it on the feed</Link>
-                            <button onClick={reset} className="btn" style={{ flex: 1 }}>Post another</button>
-                        </div>
+                        <nav className="segmented tabs" aria-label="How to add a cat">
+                            <Link href="/spot" replace scroll={false} className={`seg${tab === 'make' ? ' active' : ''}`} aria-current={tab === 'make' ? 'page' : undefined}>Make a cat</Link>
+                            <Link href="/spot?tab=spot" replace scroll={false} className={`seg${tab === 'spot' ? ' active' : ''}`} aria-current={tab === 'spot' ? 'page' : undefined}>Spot a cat</Link>
+                        </nav>
+
+                        {tab === 'make' ? (
+                            <form onSubmit={make}>
+                                <h1 className="panel-title">Make a neighborhood cat.</h1>
+                                <p className="panel-lede">Pick a neighborhood and a vibe. The AI draws the cat and it tells you where to go.</p>
+
+                                <label className="field">
+                                    <span>Neighborhood</span>
+                                    <select className="input" value={hood} onChange={(e) => setHood(e.target.value)} required>
+                                        <option value="" disabled>Choose a neighborhood</option>
+                                        {NEIGHBORHOODS.map((n) => <option key={n} value={n}>{n}</option>)}
+                                    </select>
+                                </label>
+
+                                <label className="field">
+                                    <span>Vibe</span>
+                                    <select className="input" value={vibe} onChange={(e) => setVibe(e.target.value)} required>
+                                        <option value="" disabled>Choose a vibe</option>
+                                        {VIBES.map((v) => <option key={v} value={v}>{v}</option>)}
+                                    </select>
+                                </label>
+
+                                <label className="field">
+                                    <span>Anything else? <em className="muted">(optional)</em></span>
+                                    <input className="input" value={extra} onChange={(e) => setExtra(e.target.value)} maxLength={80} placeholder="Orange tabby, wears a tiny MetroCard" />
+                                </label>
+
+                                {error && <p className="error" role="alert">{error}</p>}
+
+                                <button type="submit" disabled={!hood || !vibe || busy} className="btn btn-primary btn-block">
+                                    {busy ? <WalkingPaws /> : 'Make this cat'}
+                                </button>
+                            </form>
+                        ) : (
+                            <>
+                                <h1 className="panel-title">Saw a cat? Post it.</h1>
+                                <p className="panel-lede">Upload a photo and the AI will give it a name and a New York backstory. The city votes on the best ones.</p>
+
+                                <label className="dropzone">
+                                    {preview ? <img src={preview} alt="Preview" /> : (
+                                        <>
+                                            <PawIcon size={40} fill="var(--butter)" stroke="var(--ink)" />
+                                            <span>Drop a cat here</span>
+                                            <small>or click to choose a photo</small>
+                                        </>
+                                    )}
+                                    <input type="file" accept="image/*" onChange={onFile} aria-label="Cat photo" />
+                                </label>
+
+                                <label className="field" style={{ marginTop: '1.1rem' }}>
+                                    <span>Neighborhood <em className="muted">(optional)</em></span>
+                                    <select className="input" value={spotHood} onChange={(e) => setSpotHood(e.target.value)}>
+                                        <option value="">Not sure / somewhere else</option>
+                                        {NEIGHBORHOODS.map((n) => <option key={n} value={n}>{n}</option>)}
+                                    </select>
+                                </label>
+
+                                <label className="field">
+                                    <span>Where did you see it? <em className="muted">(optional)</em></span>
+                                    <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Bodega on 110th & Amsterdam" />
+                                </label>
+
+                                {error && <p className="error" role="alert">{error}</p>}
+
+                                <button onClick={spot} disabled={!file || busy} className="btn btn-primary btn-block">
+                                    {status === 'uploading' ? 'Uploading…' : status === 'generating' ? <WalkingPaws /> : 'Generate bio'}
+                                </button>
+                            </>
+                        )}
                     </>
                 )}
             </div>
@@ -110,22 +187,37 @@ export default function SpotPage() {
     );
 }
 
-function PawIcon({ size, className, fill, stroke }: { size: number; className?: string; fill?: string; stroke?: string }) {
+function Result({ result, onReset }: { result: Generation; onReset: () => void }) {
+    const made = result.kind === 'generated';
+    // Generated images come from an external CDN and can be slow to arrive, so show a placeholder until loaded.
+    const [loaded, setLoaded] = useState(!made);
+    const sticker = result.neighborhood ? `${made ? 'Made' : 'Spotted'} in ${result.neighborhood}` : result.location;
+
     return (
-        <svg className={className} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" fill={fill} stroke={stroke} strokeWidth={stroke ? 1.4 : undefined}>
-            <ellipse cx="12" cy="16.5" rx="5" ry="4.2" />
-            <ellipse cx="5.2" cy="10.6" rx="2" ry="2.5" />
-            <ellipse cx="9.4" cy="5.8" rx="2.1" ry="2.6" />
-            <ellipse cx="14.6" cy="5.8" rx="2.1" ry="2.6" />
-            <ellipse cx="18.8" cy="10.6" rx="2" ry="2.5" />
-        </svg>
+        <>
+            <h1 className="panel-title" style={{ marginBottom: '1rem' }}>Meet {result.cat_name}</h1>
+            {!loaded && (
+                <div className="photo-print photo-developing">
+                    <WalkingPaws label="Developing the photo…" />
+                    <span aria-hidden="true">Developing the photo…</span>
+                </div>
+            )}
+            <img src={result.image_url} alt={result.cat_name} className="photo-print" style={loaded ? undefined : { display: 'none' }} onLoad={() => setLoaded(true)} onError={() => setLoaded(true)} />
+            {sticker && <p style={{ margin: '0 0 0.75rem' }}><span className="sticker">{sticker}</span></p>}
+            <TypedBio key={result.id} text={result.bio} />
+            {result.tip && <CatTip tip={result.tip} />}
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                <Link href="/" className="btn btn-primary" style={{ flex: 1 }}>See it on the feed</Link>
+                <button onClick={onReset} className="btn" style={{ flex: 1 }}>Post another</button>
+            </div>
+        </>
     );
 }
 
-function WalkingPaws() {
+function WalkingPaws({ label = 'Writing its story…' }: { label?: string }) {
     return (
         <span className="walking-paws" role="status">
-            <span className="sr-only">Writing its story…</span>
+            <span className="sr-only">{label}</span>
             {[1, 2, 3].map((i) => <PawIcon key={i} size={18} className={`walk-paw walk-paw-${i}`} />)}
         </span>
     );
@@ -150,7 +242,7 @@ function TypedBio({ text }: { text: string }) {
     }, [text]);
 
     return (
-        <p style={{ lineHeight: 1.55, margin: '0 0 1.5rem' }}>
+        <p style={{ lineHeight: 1.55, margin: '0 0 1rem' }}>
             <span className="sr-only">{text}</span>
             <span aria-hidden="true">
                 {text.slice(0, count)}

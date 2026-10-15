@@ -6,9 +6,9 @@ import { useEffect, useState } from 'react';
 // so each awning unrolls once per load and stays put when you navigate back.
 const played = new Set<string>();
 
-type Props = { id: string; variant?: 'mint'; children: React.ReactNode };
+type Props = { id: string; variant?: 'mint'; wide?: boolean; children: React.ReactNode };
 
-export default function Storefront({ id, variant, children }: Props) {
+export default function Storefront({ id, variant, wide, children }: Props) {
     const [enter] = useState(() => !played.has(id));
     useEffect(() => { played.add(id); }, [id]);
 
@@ -16,7 +16,7 @@ export default function Storefront({ id, variant, children }: Props) {
         <section className={`storefront${enter ? ' storefront-enter' : ''}`}>
             <div className={`awning${variant === 'mint' ? ' awning-mint' : ''}`} aria-hidden="true" />
             <div className="container">
-                <div className="sign">{children}</div>
+                <div className={`sign${wide ? ' sign-wide' : ''}`}>{children}</div>
             </div>
         </section>
     );

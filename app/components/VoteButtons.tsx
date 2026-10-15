@@ -63,7 +63,7 @@ export default function VoteButtons({ generationId, initialScore, initialVote, u
 
     return (
         <div className="votes">
-            <button onClick={() => press(1)} className={`vote-btn${vote === 1 ? ' up' : ''}`} aria-label="Upvote" aria-pressed={vote === 1} title={userId ? 'Upvote' : 'Sign in to vote'}>
+            <button onClick={() => press(1)} className={`vote-btn${vote === 1 ? ' up' : ''}`} aria-label="Upvote: good tip" aria-pressed={vote === 1} title={userId ? 'Good tip' : 'Sign in to vote'}>
                 <Paw key={`up-${stamp?.dir === 1 ? stamp.n : 0}`} stamping={stamp?.dir === 1} />
                 {ring(1)}
             </button>
@@ -71,7 +71,7 @@ export default function VoteButtons({ generationId, initialScore, initialVote, u
                 {outgoing !== null && <span key={`out-${tick}`} className="score-out" aria-hidden="true">{outgoing}</span>}
                 <span key={`in-${tick}`} className={tick ? 'score-in' : undefined}>{score}</span>
             </span>
-            <button onClick={() => press(-1)} className={`vote-btn${vote === -1 ? ' down' : ''}`} aria-label="Downvote" aria-pressed={vote === -1} title={userId ? 'Downvote' : 'Sign in to vote'}>
+            <button onClick={() => press(-1)} className={`vote-btn${vote === -1 ? ' down' : ''}`} aria-label="Downvote: bad tip" aria-pressed={vote === -1} title={userId ? 'Bad tip' : 'Sign in to vote'}>
                 <Paw key={`down-${stamp?.dir === -1 ? stamp.n : 0}`} down stamping={stamp?.dir === -1} />
                 {ring(-1)}
             </button>

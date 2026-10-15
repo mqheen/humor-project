@@ -5,12 +5,15 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/app/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
+import PawIcon from '@/app/components/PawIcon';
+import { liveStreak } from '@/app/lib/nyc';
 
 export default function Nav() {
     const supabase = createClient();
     const router = useRouter();
     const pathname = usePathname();
     const [user, setUser] = useState<User | null>(null);
+    const [streak, setStreak] = useState(0);
     const linksRef = useRef<HTMLElement>(null);
     const barRef = useRef<HTMLSpanElement>(null);
 
@@ -21,6 +24,16 @@ export default function Nav() {
         });
         return () => subscription.unsubscribe();
     }, []);
+
+    // Read the streak on sign-in and on navigation (posting a cat bumps it server-side); DailyStamp broadcasts the value touch_streak returns on page load.
+    useEffect(() => {
+        if (!user) return;
+        supabase.from('profiles').select('streak, last_active').eq('id', user.id).single()
+            .then(({ data }) => setStreak(liveStreak(data?.streak, data?.last_active)));
+        const onStreak = (e: Event) => setStreak((e as CustomEvent<number>).detail);
+        window.addEventListener('streak', onStreak);
+        return () => window.removeEventListener('streak', onStreak);
+    }, [user?.id, pathname]);
 
     const signOut = async () => {
         await supabase.auth.signOut();
@@ -64,7 +77,7 @@ export default function Nav() {
                 </Link>
                 <nav className="nav-links" aria-label="Main" ref={linksRef}>
                     <Link href="/" className={cls('/')} aria-current={pathname === '/' ? 'page' : undefined}>Feed</Link>
-                    <Link href="/spot" className={cls('/spot')} aria-current={pathname === '/spot' ? 'page' : undefined}>Spot a cat</Link>
+                    <Link href="/spot" className={cls('/spot')} aria-current={pathname === '/spot' ? 'page' : undefined}>Make a cat</Link>
                     <Link href="/adopt" className={cls('/adopt')} aria-current={pathname === '/adopt' ? 'page' : undefined}>Adopt</Link>
                     {user && <Link href="/dashboard" className={cls('/dashboard')} aria-current={pathname === '/dashboard' ? 'page' : undefined}>Dashboard</Link>}
                     {user && <Link href="/profile" className={cls('/profile')} aria-current={pathname === '/profile' ? 'page' : undefined}>Profile</Link>}
@@ -72,7 +85,16 @@ export default function Nav() {
                 </nav>
                 <div className="nav-auth">
                     {user ? (
-                        <button onClick={signOut} className="btn">Sign out</button>
+                        <>
+                            {streak > 0 && (
+                                <Link href="/dashboard" className="nav-streak" title={`${streak}-day streak`}>
+                                    <PawIcon size={16} fill="var(--red)" stroke="var(--ink)" />
+                                    {streak}
+                                    <span className="sr-only">-day streak</span>
+                                </Link>
+                            )}
+                            <button onClick={signOut} className="btn">Sign out</button>
+                        </>
                     ) : (
                         <Link href="/login" className="btn btn-primary">Sign in</Link>
                     )}
