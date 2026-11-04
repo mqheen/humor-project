@@ -57,6 +57,7 @@ button, input, select { font: inherit; color: inherit; }
 .nav-bar { position: absolute; left: 0; bottom: 0.05rem; width: 22px; height: 4px; border-radius: 2px; background: var(--red); opacity: 0; pointer-events: none; }
 .nav-auth { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; }
 .nav-streak { display: inline-flex; align-items: center; gap: 0.3rem; text-decoration: none; font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.03em; }
+.streak-short { display: none; }
 
 /* Buttons */
 .btn {
@@ -118,7 +119,9 @@ button, input, select { font: inherit; color: inherit; }
 .sign-wide { max-width: none; }
 .sign-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 290px); gap: 2rem 2.5rem; align-items: center; }
 .sign-wide h1 { font-size: clamp(2.3rem, 5.5vw, 3.8rem); }
-.sign .card.cotd { transform: rotate(1.5deg); }
+.cotd-wrap { position: relative; transform: rotate(1.5deg); }
+.sign .card.cotd { transform: none; }
+.cotd-votes { margin-top: 0.9rem; padding-top: 0.75rem; border-top: 1.5px dashed var(--rule); }
 .cotd::before { display: none; } /* the label stands in for the tape */
 .cotd .card-name { font-size: 1.25rem; }
 .cotd-label {
@@ -126,8 +129,7 @@ button, input, select { font: inherit; color: inherit; }
   padding: 0.15rem 0.55rem; background: var(--red); border: 1.5px solid var(--ink); border-radius: 6px;
   font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 0.8rem; transform: translateX(-50%) rotate(-2deg);
 }
-.cotd-score { font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.15rem; letter-spacing: -0.03em; }
-.sign .cat-tip { font-size: 0.92rem; color: var(--ink); }
+.sign .cat-roast { font-size: 0.92rem; color: var(--ink); }
 
 /* Feed controls: neighborhood chips + New/Top */
 .feed-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.5rem; margin-top: 1.5rem; }
@@ -177,15 +179,34 @@ button, input, select { font: inherit; color: inherit; }
 .card-title { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
 .card-name { margin: 0; font-size: 1.45rem; }
 .card-meta { font-size: 0.9rem; color: var(--muted-ink); white-space: nowrap; }
-.card-bio { margin: 0.8rem 0 0.9rem; font-size: 0.95rem; line-height: 1.55; color: var(--muted-ink); }
-.card-body > .card-bio:last-child, .card-body > .cat-tip:last-child { margin-bottom: 0; }
+.card-bio, .cat-roast { margin: 0.8rem 0 0.9rem; }
+.card-bio .card-text { font-size: 0.95rem; line-height: 1.55; color: var(--muted-ink); }
+.card-body > .card-bio:last-child, .card-body > .cat-roast:last-child { margin-bottom: 0; }
+.card-label { display: flex; align-items: center; gap: 0.35rem; margin: 0 0 0.2rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-ink); }
+.card-label-roast { color: var(--ink); }
 .kind-tag { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-ink); }
 .title-badge { padding: 0.05rem 0.45rem; border: 1.5px solid var(--ink); border-radius: 999px; background: var(--mint); color: var(--ink); font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
 
-/* Cat's tip: paw bullet, display font */
-.cat-tip { display: flex; align-items: flex-start; gap: 0.5rem; margin: 0 0 0.9rem; font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 0.95rem; line-height: 1.4; }
-.cat-tip-paw { flex-shrink: 0; margin-top: 0.15em; }
-.cat-tip-label { color: var(--red); -webkit-text-stroke: 0.2px var(--ink); }
+/* The roast: paw bullet on the label, display font */
+.cat-roast .card-text { font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 0.95rem; line-height: 1.4; }
+.cat-roast-paw { flex-shrink: 0; }
+
+/* ⓘ hint bubble: hover and focus show it; InfoTip.tsx adds data-dismissed on Escape */
+.info-tip { position: relative; display: inline-flex; align-items: center; text-transform: none; letter-spacing: normal; }
+.info-btn { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted-ink); font-size: 0.95rem; line-height: 1; cursor: help; }
+.info-btn:hover { color: var(--ink); }
+.info-pop {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: max-content; max-width: min(240px, 70vw);
+  padding: 0.5rem 0.7rem; background: var(--butter); color: var(--ink);
+  border: 1.5px solid var(--ink); border-radius: 6px; box-shadow: 3px 3px 0 var(--ink);
+  font-family: var(--font-body), sans-serif; font-size: 0.85rem; font-weight: 400; line-height: 1.35; text-align: left;
+  visibility: hidden; pointer-events: none;
+}
+.info-tip-end .info-pop { left: auto; right: 0; }
+.info-tip:hover .info-pop, .info-tip:focus-within .info-pop { visibility: visible; }
+.info-tip[data-dismissed] .info-pop { visibility: hidden; }
+/* Cards are rotated, which traps z-index; lift the one whose tooltip is open above its neighbours. */
+.card:has(.info-tip:hover, .info-tip:focus-within) { z-index: 5; }
 .poster { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding-top: 0.75rem; border-top: 1.5px dashed var(--rule); font-size: 0.85rem; color: var(--muted-ink); }
 
 /* Votes */
@@ -200,6 +221,9 @@ button, input, select { font: inherit; color: inherit; }
 .vote-score > span { display: block; }
 .vote-score > .score-out { position: absolute; inset: 0; display: none; }
 .stamp-ring { display: none; }
+.votes-labeled { flex-direction: row; gap: 0.35rem; }
+.votes-labeled .vote-score { min-width: 0; padding-inline: 0.25rem; font-size: 0.95rem; white-space: nowrap; }
+.score-pill { font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1rem; letter-spacing: -0.03em; white-space: nowrap; }
 
 /* Empty state */
 .empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1.1rem; padding: 3rem 1rem 5rem; }
@@ -305,14 +329,52 @@ select.input { appearance: none; padding-right: 2.5rem; cursor: pointer; backgro
 .stamp-panel .punch svg { width: 62%; height: 62%; }
 .stamp-text { margin: 0 auto 1.5rem; }
 
+/* Preview before posting + owner actions */
+.preview-bar { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.5rem; }
+.preview-bar .btn-primary { flex: 1 1 100%; }
+.preview-bar .btn { flex: 1 1 auto; }
+.preview .card { transform: none; }
+.card .photo-print.photo-developing { width: calc(100% - 12px); margin: 6px 6px 0; padding: 0; border: 0; }
+.edit-name, .edit-text { width: 100%; padding: 0.5rem 0.7rem; border-radius: 8px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); }
+.edit-name { font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.3rem; letter-spacing: -0.03em; }
+.edit-text { resize: vertical; min-height: 5.5rem; line-height: 1.45; }
+.edit-count { margin: 0.2rem 0 0; font-size: 0.78rem; color: var(--muted-ink); }
+.owner-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; padding-top: 0.75rem; border-top: 1.5px dashed var(--rule); }
+.owner-actions .btn { padding: 0.4rem 0.85rem; font-size: 0.9rem; }
+
+/* Neighborhoods: bodega price board */
+.board { list-style: none; margin: 0; padding: 0; border: 1.5px solid var(--ink); border-radius: 6px; box-shadow: 6px 6px 0 var(--ink); background: var(--ink); display: grid; gap: 1.5px; }
+.board-row { position: relative; display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 1rem; align-items: center; padding: 1rem 1.25rem; background: var(--butter); }
+.board-row:first-child { border-radius: 4px 4px 0 0; }
+.board-row:last-child { border-radius: 0 0 4px 4px; }
+.board-row:hover { background: var(--stripe); }
+.board-empty { background: var(--paper); }
+.board-empty:hover { background: var(--paper); }
+.board-rank { font-family: var(--font-display), sans-serif; font-weight: 800; font-size: clamp(2.4rem, 8vw, 3.4rem); line-height: 1; letter-spacing: -0.04em; text-align: center; }
+.board-rank-none { color: var(--muted-ink); }
+.board-main { min-width: 0; display: grid; gap: 0.6rem; }
+.board-hood { margin: 0; font-size: 1.35rem; }
+/* The whole row is one link without nesting the ⓘ button inside an anchor. */
+.board-hood a { text-decoration: none; }
+.board-hood a::after { content: ""; position: absolute; inset: 0; }
+.board-stats { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: 0; font-size: 0.88rem; font-weight: 700; color: var(--muted-ink); }
+.board-top { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 0.75rem; align-items: start; }
+.board-top img { width: 72px; height: 54px; object-fit: cover; border: 1.5px solid var(--ink); border-radius: 3px; }
+.board-top .card-label { position: relative; z-index: 2; }
+.board-cat { margin: 0; font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.03em; }
+.board-roast { margin: 0; font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 0.92rem; line-height: 1.35; }
+.board-make { position: relative; z-index: 2; font-weight: 700; }
+
 /* Phones */
 @media (max-width: 640px) {
   .nav-links { order: 3; flex-basis: 100%; overflow-x: auto; margin: 0 -0.7rem; }
+  .streak-full { display: none; }
+  .streak-short { display: inline; }
   .sign { margin-top: -2.25rem; padding: 1.75rem 1.25rem 1.5rem; box-shadow: 4px 4px 0 var(--ink); }
   .sign::before, .sign::after { top: 9px; }
   .sign p { font-size: 1rem; }
   .sign-split { grid-template-columns: minmax(0, 1fr); }
-  .sign .card.cotd { max-width: 320px; margin: 0.75rem auto 0.25rem; transform: rotate(1deg); }
+  .cotd-wrap { max-width: 320px; margin: 0.75rem auto 0.25rem; transform: rotate(1deg); }
   .loyalty-punches { gap: 0.35rem; }
   .punch { width: 26px; height: 26px; }
   .punch svg { width: 16px; height: 16px; }

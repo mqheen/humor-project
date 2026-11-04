@@ -2,6 +2,9 @@ import { createClient } from '@/app/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import LoyaltyPunches from '@/app/components/LoyaltyPunches';
+import CatCard from '@/app/components/CatCard';
+import OwnerActions from '@/app/components/OwnerActions';
+import { scoreLabel } from '@/app/lib/votes';
 import { liveStreak, nextMilestone, streakTitle } from '@/app/lib/nyc';
 
 export default async function DashboardPage() {
@@ -17,11 +20,14 @@ export default async function DashboardPage() {
 
     const { data: mine } = await supabase
         .from('generations')
-        .select('id, image_url, cat_name, location, neighborhood, created_at, votes(value)')
+        .select('id, image_url, cat_name, bio, tip, kind, location, neighborhood, created_at, is_published, votes(value)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
-    const posts = (mine ?? []).map((g) => ({ ...g, score: (g.votes as { value: number }[]).reduce((s, v) => s + v.value, 0) }));
+    // RLS shows an owner their own drafts too; split them here and keep every count to published cats.
+    const all = (mine ?? []).map((g) => ({ ...g, score: (g.votes as { value: number }[]).reduce((s, v) => s + v.value, 0) }));
+    const drafts = all.filter((g) => !g.is_published);
+    const posts = all.filter((g) => g.is_published);
     const totalScore = posts.reduce((s, p) => s + p.score, 0);
 
     const name = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user.email;
@@ -49,7 +55,7 @@ export default async function DashboardPage() {
                 </div>
 
                 <div className="stat-grid">
-                    <div className="stat"><p className="stat-label">Cats you’ve posted</p><p className="stat-value">{posts.length}</p></div>
+                    <div className="stat"><p className="stat-label">Roasts you’ve posted</p><p className="stat-value">{posts.length}</p></div>
                     <div className="stat"><p className="stat-label">Votes received</p><p className="stat-value">{totalScore > 0 ? `+${totalScore}` : totalScore}</p></div>
                     <div className="stat"><p className="stat-label">Member since</p><p className="stat-value">{memberSince}</p></div>
                 </div>
@@ -70,24 +76,48 @@ export default async function DashboardPage() {
                 <p className="muted loyalty-hint">Vote or post a cat once a day to punch your card.</p>
             </section>
 
+            {drafts.length > 0 && (
+                <>
+                    <h2 className="section-title">Drafts</h2>
+                    <p className="muted" style={{ margin: 0 }}>Only you can see these. Post one when you’re happy with it.</p>
+                    <section className="grid">
+                        {drafts.map((d) => (
+                            <CatCard
+                                key={d.id}
+                                headingLevel={3}
+                                imageUrl={d.image_url}
+                                alt={d.cat_name}
+                                kindTag="Draft"
+                                name={d.cat_name}
+                                place={d.neighborhood ?? d.location}
+                                bio={d.bio}
+                                roast={d.tip}
+                                footer={<OwnerActions id={d.id} mode="draft" />}
+                            />
+                        ))}
+                    </section>
+                </>
+            )}
+
             <h2 className="section-title">Your posts</h2>
             {posts.length === 0 ? (
-                <p className="muted">You haven’t posted a cat yet. <Link href="/spot">Make one</Link>.</p>
+                <p className="muted">You haven’t posted a roast yet. <Link href="/spot">Make one</Link>.</p>
             ) : (
                 <section className="grid">
                     {posts.map((p) => (
-                        <article key={p.id} className="card">
-                            <img src={p.image_url} alt={p.cat_name} />
-                            <div className="card-body">
-                                <div className="card-head">
-                                    <div className="card-title">
-                                        <h3 className="card-name">{p.cat_name}</h3>
-                                        {(p.neighborhood ?? p.location) && <span className="sticker">{p.neighborhood ?? p.location}</span>}
-                                    </div>
-                                    <span className="card-meta">{p.score > 0 ? `+${p.score}` : p.score} votes</span>
-                                </div>
-                            </div>
-                        </article>
+                        <CatCard
+                            key={p.id}
+                            headingLevel={3}
+                            imageUrl={p.image_url}
+                            alt={p.cat_name}
+                            kindTag={p.kind === 'generated' ? 'AI-made' : 'Spotted'}
+                            name={p.cat_name}
+                            place={p.neighborhood ?? p.location}
+                            bio={p.bio}
+                            roast={p.tip}
+                            votes={<span className="score-pill">{scoreLabel(p.score)}</span>}
+                            footer={<OwnerActions id={p.id} mode="posted" />}
+                        />
                     ))}
                 </section>
             )}

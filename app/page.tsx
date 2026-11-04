@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@/app/lib/supabase/server';
 import VoteButtons from '@/app/components/VoteButtons';
 import Storefront from '@/app/components/Storefront';
-import CatTip from '@/app/components/CatTip';
+import CatCard from '@/app/components/CatCard';
 import { NEIGHBORHOODS, isNeighborhood, liveStreak, streakTitle } from '@/app/lib/nyc';
 
 type Vote = { value: number; user_id: string };
@@ -13,27 +13,30 @@ type Row = {
     votes: Vote[];
 };
 type Featured = {
-    id: number; image_url: string; cat_name: string; neighborhood: string | null; location: string | null; tip: string | null;
-    votes: { value: number }[];
+    id: number; image_url: string; cat_name: string; bio: string; neighborhood: string | null; location: string | null; tip: string | null;
+    votes: Vote[];
 };
 
-const FEATURED_FIELDS = 'id, image_url, cat_name, neighborhood, location, tip, created_at, votes(value)';
+const FEATURED_FIELDS = 'id, image_url, cat_name, bio, neighborhood, location, tip, created_at, votes(value, user_id)';
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ sort?: string; hood?: string }> }) {
-    const { sort, hood: hoodParam } = await searchParams;
-    const hood = isNeighborhood(hoodParam) ? hoodParam : null;
+// Every query here filters is_published = true: RLS lets owners see their own drafts, and drafts must never reach the feed.
+export default async function Home({ searchParams }: { searchParams: Promise<{ sort?: string; neighborhood?: string; hood?: string }> }) {
+    const { sort, neighborhood: hoodParam, hood: legacyHoodParam } = await searchParams;
+    const hoodValue = hoodParam ?? legacyHoodParam;
+    const hood = isNeighborhood(hoodValue) ? hoodValue : null;
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     let feed = supabase
         .from('generations')
         .select('id, image_url, location, cat_name, bio, created_at, kind, neighborhood, tip, profiles(first_name, last_name, avatar_url, streak, last_active), votes(value, user_id)')
+        .eq('is_published', true)
         .order('created_at', { ascending: false });
     if (hood) feed = feed.eq('neighborhood', hood);
 
     const [{ data }, { data: hoodRows }, featured] = await Promise.all([
         feed,
-        supabase.from('generations').select('neighborhood').not('neighborhood', 'is', null),
+        supabase.from('generations').select('neighborhood').eq('is_published', true).not('neighborhood', 'is', null),
         catOfTheDay(supabase),
     ]);
 
@@ -54,7 +57,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ s
         const s = next.sort !== undefined ? next.sort : sort === 'top' ? 'top' : null;
         const h = next.hood !== undefined ? next.hood : hood;
         if (s) q.set('sort', s);
-        if (h) q.set('hood', h);
+        if (h) q.set('neighborhood', h);
         const qs = q.toString();
         return qs ? `/?${qs}` : '/';
     };
@@ -64,14 +67,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ s
             <Storefront id="feed" wide>
                 <div className="sign-split">
                     <div>
-                        <h1>Every neighborhood has a cat. Ask it where to go.</h1>
-                        <p>AI-made cats, real New York tips, ranked by your votes.</p>
+                        <h1>New York’s cats have opinions about your neighborhood.</h1>
+                        <p>One cat per neighborhood. A fresh roast every day. You decide what’s funny.</p>
                         <div className="sign-actions">
                             <Link href="/spot" className="btn btn-primary btn-lg">Make a cat</Link>
-                            <Link href="/spot?tab=spot" className="text-link">Spot a real one</Link>
+                            <Link href="/spot?tab=spot" className="text-link">Roast a real cat</Link>
                         </div>
                     </div>
-                    {featured && <CatOfTheDay cat={featured} />}
+                    {featured && <CatOfTheDay cat={featured} userId={user?.id ?? null} />}
                 </div>
             </Storefront>
 
@@ -112,19 +115,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ s
                             const made = r.kind === 'generated';
                             const place = r.neighborhood ?? r.location;
                             return (
-                                <article key={r.id} className="card">
-                                    <img src={r.image_url} alt={r.cat_name} />
-                                    <div className="card-body">
-                                        <div className="card-head">
-                                            <div className="card-title">
-                                                <span className="kind-tag">{made ? 'AI-made' : 'Spotted'}</span>
-                                                <h2 className="card-name">{r.cat_name}</h2>
-                                                {place && <span className="sticker">{place}</span>}
-                                            </div>
-                                            <VoteButtons generationId={r.id} initialScore={r.score} initialVote={r.myVote} userId={user?.id ?? null} />
-                                        </div>
-                                        <p className="card-bio">{r.bio}</p>
-                                        {r.tip && <CatTip tip={r.tip} />}
+                                <CatCard
+                                    key={r.id}
+                                    imageUrl={r.image_url}
+                                    alt={r.cat_name}
+                                    kindTag={made ? 'AI-made' : 'Spotted'}
+                                    name={r.cat_name}
+                                    place={place}
+                                    bio={r.bio}
+                                    roast={r.tip}
+                                    votes={<VoteButtons generationId={r.id} initialScore={r.score} initialVote={r.myVote} userId={user?.id ?? null} />}
+                                    footer={(
                                         <div className="poster">
                                             <span className="avatar avatar-xs">
                                                 {r.profiles?.avatar_url ? <img src={r.profiles.avatar_url} alt="" /> : null}
@@ -132,8 +133,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ s
                                             <span>{made ? 'Made' : 'Spotted'} by {poster} on {new Date(r.created_at).toLocaleDateString()}</span>
                                             <span className="title-badge">{streakTitle(liveStreak(r.profiles?.streak, r.profiles?.last_active))}</span>
                                         </div>
-                                    </div>
-                                </article>
+                                    )}
+                                />
                             );
                         })}
                     </section>
@@ -144,7 +145,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ s
 }
 
 // Highest score from votes cast in the last 24 hours (ties go to the newest cat);
-// with no positive scores today, fall back to the newest AI-made cat.
+// with no positive scores today, fall back to the newest published AI-made cat.
 async function catOfTheDay(supabase: Awaited<ReturnType<typeof createClient>>): Promise<Featured | null> {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data: recentVotes } = await supabase.from('votes').select('generation_id, value').gte('created_at', since);
@@ -155,33 +156,38 @@ async function catOfTheDay(supabase: Awaited<ReturnType<typeof createClient>>): 
 
     if (best > 0) {
         const ids = [...scores].filter(([, s]) => s === best).map(([id]) => id);
-        const { data } = await supabase.from('generations').select(FEATURED_FIELDS).in('id', ids)
+        const { data } = await supabase.from('generations').select(FEATURED_FIELDS).in('id', ids).eq('is_published', true)
             .order('created_at', { ascending: false }).limit(1).maybeSingle();
         if (data) return data as unknown as Featured;
     }
 
-    const { data } = await supabase.from('generations').select(FEATURED_FIELDS).eq('kind', 'generated')
+    const { data } = await supabase.from('generations').select(FEATURED_FIELDS).eq('kind', 'generated').eq('is_published', true)
         .order('created_at', { ascending: false }).limit(1).maybeSingle();
     return (data as unknown as Featured) ?? null;
 }
 
-function CatOfTheDay({ cat }: { cat: Featured }) {
+function CatOfTheDay({ cat, userId }: { cat: Featured; userId: string | null }) {
     const score = cat.votes.reduce((s, v) => s + v.value, 0);
-    const place = cat.neighborhood ?? cat.location;
+    const myVote = (userId ? cat.votes.find((v) => v.user_id === userId)?.value ?? null : null) as 1 | -1 | null;
     return (
-        <aside className="card cotd" aria-labelledby="cotd-name">
+        <div className="cotd-wrap">
             <span className="cotd-label">Cat of the Day</span>
-            <img src={cat.image_url} alt={cat.cat_name} />
-            <div className="card-body">
-                <div className="card-head">
-                    <div className="card-title">
-                        <h2 id="cotd-name" className="card-name">{cat.cat_name}</h2>
-                        {place && <span className="sticker">{place}</span>}
+            <CatCard
+                as="aside"
+                className="cotd"
+                nameId="cotd-name"
+                imageUrl={cat.image_url}
+                alt={cat.cat_name}
+                name={cat.cat_name}
+                place={cat.neighborhood ?? cat.location}
+                bio={cat.bio}
+                roast={cat.tip}
+                footer={(
+                    <div className="cotd-votes">
+                        <VoteButtons labeled generationId={cat.id} initialScore={score} initialVote={myVote} userId={userId} />
                     </div>
-                    <span className="cotd-score" aria-label={`Score ${score}`}>{score > 0 ? `+${score}` : score}</span>
-                </div>
-                {cat.tip && <CatTip tip={cat.tip} />}
-            </div>
-        </aside>
+                )}
+            />
+        </div>
     );
 }

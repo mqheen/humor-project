@@ -5,7 +5,7 @@ export const NEIGHBORHOODS = [
     'Long Island City', 'Jackson Heights', 'Flushing', 'The Bronx', 'Staten Island',
 ] as const;
 
-// Checked local anchors the AI can lean on, so bios and tips name real streets, trains, parks and foods
+// Checked local anchors the AI can lean on, so bios and roasts name real streets, trains, parks and foods
 // instead of inventing them. Keep entries to things that are stable and widely known.
 export const NEIGHBORHOOD_FACTS: Record<(typeof NEIGHBORHOODS)[number], string> = {
     'Morningside Heights': '1 train at 110th St and 116th St–Columbia University; Riverside Park along the Hudson; Morningside Park; the Cathedral of St. John the Divine on Amsterdam Ave; Columbia’s Low Library steps; late-night diners on Broadway.',
@@ -33,6 +33,9 @@ export const NEIGHBORHOOD_FACTS: Record<(typeof NEIGHBORHOODS)[number], string> 
 export const VIBES = [
     'Bodega regular', 'Subway commuter', 'Rooftop cat', 'Fire escape philosopher', 'Laundromat manager', 'Pizza slice critic',
 ] as const;
+
+// Max lengths for a cat's editable text (the roast lives in the generations.tip column).
+export const TEXT_LIMITS = { cat_name: 40, bio: 300, tip: 240 } as const;
 
 export const isNeighborhood = (v: unknown): v is string => typeof v === 'string' && (NEIGHBORHOODS as readonly string[]).includes(v);
 export const isVibe = (v: unknown): v is string => typeof v === 'string' && (VIBES as readonly string[]).includes(v);

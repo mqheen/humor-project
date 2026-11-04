@@ -9,7 +9,7 @@ const body = Nunito_Sans({ subsets: ['latin'], weight: ['400', '700'], variable:
 
 export const metadata: Metadata = {
     title: 'Bodega Cats of NYC',
-    description: 'Spot a cat in the city, let the AI write its story, and vote for the best ones.',
+    description: 'New York’s cats roast your neighborhood. One cat per block, a fresh roast every day, ranked by your votes.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

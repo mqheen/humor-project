@@ -13,18 +13,18 @@ const FAL_BASE_URL = 'https://fal.run';
 const SPOTTED_INTRO = `You are writing a profile for a cat that someone spotted in New York City.
 Look at the photo and make the profile specific to what you can actually see (color, pose, setting, expression).`;
 
-// Shared by both branches: every cat is a local guide for its neighborhood.
+// Shared by both branches: every cat has opinions about its neighborhood.
 function profileRules(place: string, vibe?: string) {
     const facts = place in NEIGHBORHOOD_FACTS ? NEIGHBORHOOD_FACTS[place as keyof typeof NEIGHBORHOOD_FACTS] : null;
-    return `Every cat on this site is a local guide for its neighborhood.
+    return `Every cat on this site is a lifelong resident with strong opinions about its neighborhood.
 ${facts ? `Verified facts about ${place}: ${facts}
 Base every specific claim (street, train line, park, food) on these facts. Do not invent street names, train lines or businesses. If unsure, leave it out.
 ` : ''}
-Return ONLY a JSON object in this exact shape: {"name": "...", "bio": "...", "tip": "..."}
+Return ONLY a JSON object in this exact shape: {"name": "...", "bio": "...", "roast": "..."}
 - name: a cat name.
 - bio: 2-3 sentences written as a lifelong resident of ${place}${vibe ? `, in the "${vibe}" vibe` : ''}. Mention one real, specific thing about ${place}: a street, park, train line, or known food.
-- tip: one concrete, useful recommendation for a first-time visitor to ${place}: what to eat, where to sit, which train, when to go, or what to skip. It must be real and accurate. Prefer landmarks, parks, train lines and food types over business names. NEVER invent a store or restaurant name. Under 160 characters, in the cat's voice.
-Keep it warm, not mean. No hashtags, no emojis.`;
+- roast: one funny roast of ${place} itself, in the cat's voice: its trains, rent, crowds, weather, food or habits. Punch at the neighborhood, never at people or groups. It must rest on real, accurate details. Prefer landmarks, parks, train lines and food types over business names. NEVER invent a store or restaurant name. Under 160 characters.
+Affectionate, not cruel. No hashtags, no emojis.`;
 }
 
 // The bio step's template asks for "your name and a bio" in prose; this pins the shape so
@@ -41,21 +41,21 @@ type StreamEvent =
 // Step names used when the chain can't be loaded; they match the seeded chain's names.
 const IMAGE_STEP = 'Draw the cat';
 const BIO_STEP = 'Write the bio';
-const TIP_STEP = 'Write the tip';
+const ROAST_STEP = 'Write the roast';
 
-type Parsed = { name?: string; bio?: string; tip?: string };
+type Parsed = { name?: string; bio?: string; roast?: string };
 
-// Keep tips under 160 characters: whole sentences if they fit, otherwise cut at a word.
-function fitTip(tip: string, max = 160) {
-    tip = tip.trim();
-    if (tip.length <= max) return tip;
+// Keep roasts under 160 characters: whole sentences if they fit, otherwise cut at a word.
+function fitRoast(roast: string, max = 160) {
+    roast = roast.trim();
+    if (roast.length <= max) return roast;
     let out = '';
-    for (const sentence of tip.match(/[^.!?]+[.!?]+/g) ?? []) {
+    for (const sentence of roast.match(/[^.!?]+[.!?]+/g) ?? []) {
         if ((out + sentence).trim().length > max) break;
         out += sentence;
     }
     if (out.trim()) return out.trim();
-    return tip.slice(0, max - 1).replace(/\s+\S*$/, '') + '…';
+    return roast.slice(0, max - 1).replace(/\s+\S*$/, '') + '…';
 }
 
 // Plain-text step output: drop any reasoning block and wrapping quotes.
@@ -258,7 +258,7 @@ export async function POST(request: Request) {
     };
 
     const encoder = new TextEncoder();
-    const fallbackSteps = kind === 'generated' ? [IMAGE_STEP, BIO_STEP, TIP_STEP] : [BIO_STEP, TIP_STEP];
+    const fallbackSteps = kind === 'generated' ? [IMAGE_STEP, BIO_STEP, ROAST_STEP] : [BIO_STEP, ROAST_STEP];
 
     // Validation errors above are plain JSON with a status. Once the stream starts the status is
     // already 200, so failures from here on arrive as a final {error} event instead.
@@ -382,7 +382,8 @@ export async function POST(request: Request) {
 
                 const finalImage = kind === 'generated' ? outputs.image_url : inputImageUrl;
                 if (!finalImage) return await fail(502, { error: 'Image generation failed.', detail: 'No image step produced an image.' });
-                parsed = { name: outputs.name, bio: outputs.bio, tip: outputs.tip };
+                // The chain's roast step still has output_key 'tip' (it feeds the generations.tip column).
+                parsed = { name: outputs.name, bio: outputs.bio, roast: outputs.tip };
                 imageUrl = finalImage;
                 fullPrompt = textPrompts.join('\n\n---\n\n');
                 model = textModel ?? steps.find(s => s.llm_models.kind !== 'image')?.llm_models.model_id ?? FALLBACK_MODEL;
@@ -405,7 +406,7 @@ export async function POST(request: Request) {
                     // Image and text don't depend on each other, so run them together.
                     begin(IMAGE_STEP);
                     begin(BIO_STEP);
-                    begin(TIP_STEP);
+                    begin(ROAST_STEP);
                     const messages: Message[] = [{ role: 'user', content: fullPrompt }];
                     const [image, groq] = await Promise.all([
                         makeImage(FAL_BASE_URL, falKey, FALLBACK_IMAGE_MODEL, imagePrompt),
@@ -421,7 +422,7 @@ export async function POST(request: Request) {
                 } else {
                     imageUrl = inputImageUrl!;
                     begin(BIO_STEP);
-                    begin(TIP_STEP);
+                    begin(ROAST_STEP);
                     fullPrompt = `${SPOTTED_INTRO}\n\n${profileRules(neighborhood ?? 'New York City')}`
                         + (location ? `\n\nWhere it was spotted: ${location}` : '');
                     const messages: Message[] = [{
@@ -443,10 +444,10 @@ export async function POST(request: Request) {
                     return await fail(502, { error: 'Could not parse AI response.', raw: text });
                 }
                 complete(BIO_STEP);
-                complete(TIP_STEP);
+                complete(ROAST_STEP);
             }
 
-            if (!parsed.name || !parsed.bio || !parsed.tip) {
+            if (!parsed.name || !parsed.bio || !parsed.roast) {
                 return await fail(502, { error: 'AI response was incomplete.', raw: JSON.stringify(parsed) });
             }
 
@@ -463,7 +464,9 @@ export async function POST(request: Request) {
                     model,
                     cat_name: parsed.name,
                     bio: parsed.bio,
-                    tip: fitTip(parsed.tip),
+                    tip: fitRoast(parsed.roast),
+                    // Drafts stay private to their owner until they hit "Post it" in the preview.
+                    is_published: false,
                 })
                 .select()
                 .single();

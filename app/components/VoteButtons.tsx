@@ -3,15 +3,18 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/app/lib/supabase/client';
+import { scoreLabel } from '@/app/lib/votes';
 
 type Props = {
     generationId: number;
     initialScore: number;
     initialVote: 1 | -1 | null;
     userId: string | null;
+    // Cat of the Day: shows "▲ N votes" beside the paws and disables them when signed out.
+    labeled?: boolean;
 };
 
-export default function VoteButtons({ generationId, initialScore, initialVote, userId }: Props) {
+export default function VoteButtons({ generationId, initialScore, initialVote, userId, labeled = false }: Props) {
     const supabase = createClient();
     const router = useRouter();
     const [score, setScore] = useState(initialScore);
@@ -61,17 +64,22 @@ export default function VoteButtons({ generationId, initialScore, initialVote, u
 
     const ring = (dir: 1 | -1) => stamp?.dir === dir && <span key={stamp.n} className="stamp-ring" aria-hidden="true" />;
 
+    const locked = labeled && !userId;
     return (
-        <div className="votes">
-            <button onClick={() => press(1)} className={`vote-btn${vote === 1 ? ' up' : ''}`} aria-label="Upvote: good tip" aria-pressed={vote === 1} title={userId ? 'Good tip' : 'Sign in to vote'}>
+        <div className={`votes${labeled ? ' votes-labeled' : ''}`} title={locked ? 'Sign in to vote' : undefined}>
+            <button onClick={() => press(1)} disabled={locked} className={`vote-btn${vote === 1 ? ' up' : ''}`} aria-label="Upvote: funny roast" aria-pressed={vote === 1} title={userId ? 'Funny' : 'Sign in to vote'}>
                 <Paw key={`up-${stamp?.dir === 1 ? stamp.n : 0}`} stamping={stamp?.dir === 1} />
                 {ring(1)}
             </button>
-            <span className="vote-score">
-                {outgoing !== null && <span key={`out-${tick}`} className="score-out" aria-hidden="true">{outgoing}</span>}
-                <span key={`in-${tick}`} className={tick ? 'score-in' : undefined}>{score}</span>
+            <span className="vote-score" aria-live={labeled ? 'polite' : undefined}>
+                {labeled ? scoreLabel(score) : (
+                    <>
+                        {outgoing !== null && <span key={`out-${tick}`} className="score-out" aria-hidden="true">{outgoing}</span>}
+                        <span key={`in-${tick}`} className={tick ? 'score-in' : undefined}>{score}</span>
+                    </>
+                )}
             </span>
-            <button onClick={() => press(-1)} className={`vote-btn${vote === -1 ? ' down' : ''}`} aria-label="Downvote: bad tip" aria-pressed={vote === -1} title={userId ? 'Bad tip' : 'Sign in to vote'}>
+            <button onClick={() => press(-1)} disabled={locked} className={`vote-btn${vote === -1 ? ' down' : ''}`} aria-label="Downvote: not funny" aria-pressed={vote === -1} title={userId ? 'Not funny' : 'Sign in to vote'}>
                 <Paw key={`down-${stamp?.dir === -1 ? stamp.n : 0}`} down stamping={stamp?.dir === -1} />
                 {ring(-1)}
             </button>

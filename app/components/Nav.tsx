@@ -6,7 +6,8 @@ import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/app/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 import PawIcon from '@/app/components/PawIcon';
-import { liveStreak } from '@/app/lib/nyc';
+import InfoTip from '@/app/components/InfoTip';
+import { liveStreak, streakTitle } from '@/app/lib/nyc';
 
 export default function Nav() {
     const supabase = createClient();
@@ -78,7 +79,7 @@ export default function Nav() {
                 <nav className="nav-links" aria-label="Main" ref={linksRef}>
                     <Link href="/" className={cls('/')} aria-current={pathname === '/' ? 'page' : undefined}>Feed</Link>
                     <Link href="/spot" className={cls('/spot')} aria-current={pathname === '/spot' ? 'page' : undefined}>Make a cat</Link>
-                    <Link href="/adopt" className={cls('/adopt')} aria-current={pathname === '/adopt' ? 'page' : undefined}>Adopt</Link>
+                    <Link href="/neighborhoods" className={cls('/neighborhoods')} aria-current={pathname === '/neighborhoods' ? 'page' : undefined}>Neighborhoods</Link>
                     {user && <Link href="/dashboard" className={cls('/dashboard')} aria-current={pathname === '/dashboard' ? 'page' : undefined}>Dashboard</Link>}
                     {user && <Link href="/profile" className={cls('/profile')} aria-current={pathname === '/profile' ? 'page' : undefined}>Profile</Link>}
                     <span className="nav-bar" ref={barRef} aria-hidden="true" />
@@ -87,11 +88,16 @@ export default function Nav() {
                     {user ? (
                         <>
                             {streak > 0 && (
-                                <Link href="/dashboard" className="nav-streak" title={`${streak}-day streak`}>
-                                    <PawIcon size={16} fill="var(--red)" stroke="var(--ink)" />
-                                    {streak}
-                                    <span className="sr-only">-day streak</span>
-                                </Link>
+                                <InfoTip align="end" text="Visit daily to keep your streak. 3 days = Regular, 7 = Local, 14 = Block captain, 30 = Mayor.">
+                                    {(a11y) => (
+                                        <Link href="/dashboard" className="nav-streak" {...a11y}>
+                                            <PawIcon size={16} fill="var(--red)" stroke="var(--ink)" />
+                                            <span className="streak-full" aria-hidden="true">Day {streak} · {streakTitle(streak)}</span>
+                                            <span className="streak-short" aria-hidden="true">{streak}</span>
+                                            <span className="sr-only">Day {streak}, {streakTitle(streak)}</span>
+                                        </Link>
+                                    )}
+                                </InfoTip>
                             )}
                             <button onClick={signOut} className="btn">Sign out</button>
                         </>
