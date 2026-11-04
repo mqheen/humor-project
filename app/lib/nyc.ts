@@ -35,7 +35,7 @@ export const VIBES = [
 ] as const;
 
 // Max lengths for a cat's editable text (the roast lives in the generations.tip column).
-export const TEXT_LIMITS = { cat_name: 40, bio: 300, tip: 240 } as const;
+export const TEXT_LIMITS = { cat_name: 40, bio: 400, tip: 240 } as const;
 
 export const isNeighborhood = (v: unknown): v is string => typeof v === 'string' && (NEIGHBORHOODS as readonly string[]).includes(v);
 export const isVibe = (v: unknown): v is string => typeof v === 'string' && (VIBES as readonly string[]).includes(v);
