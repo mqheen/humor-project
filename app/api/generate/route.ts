@@ -1,8 +1,7 @@
 import { createClient } from '@/app/lib/supabase/server';
 import { NextResponse } from 'next/server';
-import { NEIGHBORHOOD_FACTS, isNeighborhood, isVibe } from '@/app/lib/nyc';
-
-type Supabase = Awaited<ReturnType<typeof createClient>>;
+import { NEIGHBORHOOD_FACTS, TEXT_LIMITS, isNeighborhood, isVibe } from '@/app/lib/nyc';
+import { chat, describeMessages, fitText, loadMix, loadSteps, makeImage, makeResponseLogger, runSteps, type Message } from '@/app/lib/pipeline';
 
 // Fallback pipeline: used only when the mix or its steps can't be loaded from the database.
 const FALLBACK_MODEL = 'qwen/qwen3.8-27b';
@@ -22,14 +21,10 @@ Base every specific claim (street, train line, park, food) on these facts. Do no
 ` : ''}
 Return ONLY a JSON object in this exact shape: {"name": "...", "bio": "...", "roast": "..."}
 - name: a cat name.
-- bio: 2-3 sentences written as a lifelong resident of ${place}${vibe ? `, in the "${vibe}" vibe` : ''}. Mention one real, specific thing about ${place}: a street, park, train line, or known food.
-- roast: one funny roast of ${place} itself, in the cat's voice: its trains, rent, crowds, weather, food or habits. Punch at the neighborhood, never at people or groups. It must rest on real, accurate details. Prefer landmarks, parks, train lines and food types over business names. NEVER invent a store or restaurant name. Under 160 characters.
+- bio: one sentence, under 20 words, written as a lifelong resident of ${place}${vibe ? `, in the "${vibe}" vibe` : ''}. Mention one real, specific thing about ${place}: a street, park, train line, or known food.
+- roast: one funny roast of ${place} itself, in the cat's voice: its trains, rent, crowds, weather, food or habits. Punch at the neighborhood, never at people or groups. It must rest on real, accurate details. Prefer landmarks, parks, train lines and food types over business names. NEVER invent a store or restaurant name. Under 200 characters.
 Affectionate, not cruel. No hashtags, no emojis.`;
 }
-
-// The bio step's template asks for "your name and a bio" in prose; this pins the shape so
-// we can fill cat_name and bio separately.
-const BIO_CONTRACT = `\n\nReturn ONLY a JSON object in this exact shape: {"name": "...", "bio": "..."}`;
 
 // Events written to the response, one JSON object per line.
 type StreamEvent =
@@ -44,143 +39,6 @@ const BIO_STEP = 'Write the bio';
 const ROAST_STEP = 'Write the roast';
 
 type Parsed = { name?: string; bio?: string; roast?: string };
-
-// Keep roasts under 160 characters: whole sentences if they fit, otherwise cut at a word.
-function fitRoast(roast: string, max = 160) {
-    roast = roast.trim();
-    if (roast.length <= max) return roast;
-    let out = '';
-    for (const sentence of roast.match(/[^.!?]+[.!?]+/g) ?? []) {
-        if ((out + sentence).trim().length > max) break;
-        out += sentence;
-    }
-    if (out.trim()) return out.trim();
-    return roast.slice(0, max - 1).replace(/\s+\S*$/, '') + '…';
-}
-
-// Plain-text step output: drop any reasoning block and wrapping quotes.
-function cleanText(text: string) {
-    return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim().replace(/^["“]([\s\S]*)["”]$/, '$1').trim();
-}
-
-type Content = string | { type: string; text?: string; image_url?: { url: string } }[];
-type Message = { role: 'system' | 'user'; content: Content };
-type Usage = { prompt_tokens?: number; completion_tokens?: number };
-type Call<T> = { latencyMs: number; raw: unknown } & (({ ok: true } & T) | { ok: false; detail: string });
-
-function parseRaw(text: string): unknown {
-    try { return JSON.parse(text); } catch { return { raw: text }; }
-}
-
-async function chat(baseUrl: string, apiKey: string, model: string, messages: Message[], opts: { temperature?: number; maxTokens: number; json: boolean }): Promise<Call<{ text: string; usage: Usage }>> {
-    const started = Date.now();
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-            model,
-            ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-            max_completion_tokens: opts.maxTokens,
-            ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
-            messages,
-        }),
-    });
-    const body = await res.text();
-    const latencyMs = Date.now() - started;
-    const raw = parseRaw(body);
-    if (!res.ok) return { ok: false, detail: body, latencyMs, raw };
-    const json = raw as { choices?: { message?: { content?: string } }[]; usage?: Usage };
-    return { ok: true, text: json?.choices?.[0]?.message?.content ?? '', usage: json?.usage ?? {}, latencyMs, raw };
-}
-
-async function makeImage(baseUrl: string, falKey: string, model: string, prompt: string): Promise<Call<{ url: string }>> {
-    const started = Date.now();
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/${model}`, {
-        method: 'POST',
-        headers: { Authorization: `Key ${falKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, image_size: 'landscape_4_3', num_images: 1, num_inference_steps: 4, enable_safety_checker: true }),
-    });
-    const body = await res.text();
-    const latencyMs = Date.now() - started;
-    const raw = parseRaw(body);
-    if (!res.ok) return { ok: false, detail: body, latencyMs, raw };
-    const url = (raw as { images?: { url?: unknown }[] })?.images?.[0]?.url;
-    return typeof url === 'string' ? { ok: true, url, latencyMs, raw } : { ok: false, detail: body, latencyMs, raw };
-}
-
-function describeMessages(messages: Message[]) {
-    return messages.map(m => {
-        const text = typeof m.content === 'string'
-            ? m.content
-            : m.content.map(p => p.text ?? (p.image_url ? `[image] ${p.image_url.url}` : '')).join('\n');
-        return `[${m.role}]\n${text}`;
-    }).join('\n\n');
-}
-
-// --- Database-driven pipeline ---
-
-type Provider = { base_url: string | null; api_key_env: string | null; is_active: boolean };
-type Model = { id: number; model_id: string; kind: 'text' | 'vision' | 'image'; supports_temperature: boolean; is_active: boolean; llm_providers: Provider | null };
-type Step = {
-    id: number;
-    step_order: number;
-    name: string;
-    system_prompt: string | null;
-    prompt_template: string;
-    temperature: number | null;
-    max_tokens: number | null;
-    output_key: string;
-    term_category: string | null;
-    is_active: boolean;
-    llm_models: Model | null;
-};
-type MixRow = {
-    id: number;
-    prompt_chain_mix_items: {
-        run_order: number;
-        is_enabled: boolean;
-        prompt_chains: { id: number; is_active: boolean; prompt_chain_steps: Step[] } | null;
-    }[];
-};
-type ReadyStep = Step & { llm_models: Model & { llm_providers: Provider } };
-
-async function loadSteps(supabase: Supabase, mix: MixRow | null): Promise<ReadyStep[] | null> {
-    if (!mix) return null;
-    const chains = mix.prompt_chain_mix_items
-        .filter(i => i.is_enabled && i.prompt_chains?.is_active)
-        .sort((a, b) => a.run_order - b.run_order);
-    const steps = chains.flatMap(i => i.prompt_chains!.prompt_chain_steps
-        .filter(s => s.is_active)
-        .sort((a, b) => a.step_order - b.step_order));
-    if (!steps.length) return null;
-    // Every step needs a usable model and provider, otherwise fall back rather than half-run.
-    for (const s of steps) {
-        const m = s.llm_models;
-        if (!m?.is_active || !m.llm_providers?.is_active || !m.llm_providers.base_url || !m.llm_providers.api_key_env) return null;
-    }
-    return steps as ReadyStep[];
-}
-
-function pickWeighted<T extends { weight: number }>(items: T[]): T | null {
-    const total = items.reduce((sum, i) => sum + Math.max(i.weight, 0), 0);
-    if (total <= 0) return items[0] ?? null;
-    let r = Math.random() * total;
-    for (const item of items) {
-        r -= Math.max(item.weight, 0);
-        if (r < 0) return item;
-    }
-    return items[items.length - 1] ?? null;
-}
-
-// Templates are stored with a literal "\n"; turn those into real newlines.
-function fill(template: string, vars: Record<string, string>) {
-    return template
-        .replace(/\\n/g, '\n')
-        .replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => vars[key] ?? '');
-}
 
 export async function POST(request: Request) {
     const supabase = await createClient();
@@ -205,14 +63,7 @@ export async function POST(request: Request) {
     }
 
     // Load the mix (with its chains, steps, models and providers) before logging so the request row gets mix_id.
-    const { data: mix } = await supabase
-        .from('prompt_chain_mixes')
-        .select(`id, prompt_chain_mix_items(run_order, is_enabled, prompt_chains(id, is_active,
-            prompt_chain_steps(id, step_order, name, system_prompt, prompt_template, temperature, max_tokens, output_key, term_category, is_active,
-                llm_models(id, model_id, kind, supports_temperature, is_active, llm_providers(base_url, api_key_env, is_active)))))`)
-        .eq('slug', kind)
-        .eq('is_active', true)
-        .maybeSingle<MixRow>();
+    const mix = await loadMix(supabase, kind);
 
     const startedAt = Date.now();
     // Logging is best effort: if the request row can't be written, generation still runs.
@@ -229,25 +80,7 @@ export async function POST(request: Request) {
         .single();
     const requestId: number | null = requestRow?.id ?? null;
 
-    const logResponse = async (entry: {
-        stepId: number | null; modelId: number | null; promptSent: string; temperature?: number;
-        call: Call<object>; text?: string; usage?: Usage;
-    }) => {
-        if (!requestId) return;
-        await supabase.from('llm_responses').insert({
-            request_id: requestId,
-            step_id: entry.stepId,
-            model_id: entry.modelId,
-            prompt_sent: entry.promptSent,
-            response_text: entry.text ?? null,
-            response_json: entry.call.raw ?? null,
-            temperature: entry.temperature ?? null,
-            prompt_tokens: entry.usage?.prompt_tokens ?? null,
-            completion_tokens: entry.usage?.completion_tokens ?? null,
-            latency_ms: entry.call.latencyMs,
-            error: entry.call.ok ? null : entry.call.detail.slice(0, 4000),
-        });
-    };
+    const logResponse = makeResponseLogger(supabase, requestId);
 
     const finish = async (patch: { status: 'succeeded' | 'failed'; error?: string; generation_id?: number }) => {
         if (!requestId) return;
@@ -280,7 +113,7 @@ export async function POST(request: Request) {
             };
 
         try {
-            const steps = await loadSteps(supabase, mix ?? null);
+            const steps = await loadSteps(mix);
             send({ steps: steps ? steps.map(s => s.name) : fallbackSteps });
             let parsed: Parsed;
             let imageUrl: string;
@@ -289,96 +122,10 @@ export async function POST(request: Request) {
             let model: string;
 
             if (steps) {
-                // Terms and examples are only read when a step needs them; cache per request.
-                const termCache = new Map<string, { term: string; weight: number }[]>();
-                const termsFor = async (category: string) => {
-                    if (!termCache.has(category)) {
-                        const { data } = await supabase.from('terms').select('term, weight').eq('category', category).eq('is_active', true);
-                        termCache.set(category, data ?? []);
-                    }
-                    return termCache.get(category)!;
-                };
-                let examples: Record<string, string> | null = null;
-                const examplesFor = async () => {
-                    if (!examples) {
-                        const { data } = await supabase
-                            .from('generation_examples')
-                            .select('kind, output, neighborhood')
-                            .eq('is_active', true)
-                            .in('kind', ['bio', 'tip']);
-                        // Prefer examples written for this neighborhood, then the rest.
-                        const rows = (data ?? []).sort((a, b) => Number(b.neighborhood === neighborhood) - Number(a.neighborhood === neighborhood));
-                        const format = (k: string) => rows.filter(r => r.kind === k).slice(0, 3).map(r => `- ${r.output}`).join('\n');
-                        examples = { 'examples.bio': format('bio'), 'examples.tip': format('tip') };
-                    }
-                    return examples;
-                };
-
-                const outputs: Record<string, string> = {};
-                const textPrompts: string[] = [];
-                let textModel: string | null = null;
-
-                for (const step of steps) {
-                    begin(step.name);
-                    const m = step.llm_models;
-                    const apiKey = process.env[m.llm_providers.api_key_env!];
-                    if (!apiKey) return await fail(500, { error: `${m.llm_providers.api_key_env} is not set.` });
-
-                    const tone = step.term_category ? pickWeighted(await termsFor(step.term_category))?.term ?? '' : '';
-                    const vars: Record<string, string> = {
-                        neighborhood: neighborhood ?? 'New York City',
-                        vibe: vibe ?? '',
-                        location: location ?? '',
-                        tone,
-                        image_url: outputs.image_url ?? inputImageUrl ?? '',
-                        ...(step.prompt_template.includes('{{examples.') ? await examplesFor() : {}),
-                        ...Object.fromEntries(Object.entries(outputs).map(([k, v]) => [`prev.${k}`, v])),
-                    };
-
-                    if (m.kind === 'image') {
-                        let prompt = fill(step.prompt_template, vars);
-                        if (extra) prompt += ` ${extra}.`;
-                        const call = await makeImage(m.llm_providers.base_url!, apiKey, m.model_id, prompt);
-                        await logResponse({ stepId: step.id, modelId: m.id, promptSent: prompt, call, text: call.ok ? call.url : undefined });
-                        if (!call.ok) return await fail(502, { error: 'Image generation failed.', detail: call.detail });
-                        imagePrompt = prompt;
-                        outputs[step.output_key] = call.url;
-                        complete(step.name);
-                        continue;
-                    }
-
-                    // Vision: attach the photo for vision models, or any step whose template asks for {{image_url}}.
-                    const photo = vars.image_url && (m.kind === 'vision' || step.prompt_template.includes('{{image_url}}')) ? vars.image_url : null;
-                    const isBio = step.output_key === 'bio';
-                    let text = fill(step.prompt_template, photo ? { ...vars, image_url: '' } : vars).trim();
-                    if (isBio) text += BIO_CONTRACT;
-                    if (photo && !text) text = 'Here is the photo.';
-
-                    const messages: Message[] = [];
-                    if (step.system_prompt) messages.push({ role: 'system', content: fill(step.system_prompt, vars) });
-                    messages.push({ role: 'user', content: photo ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: photo } }] : text });
-
-                    const temperature = m.supports_temperature && step.temperature !== null ? Number(step.temperature) : undefined;
-                    const call = await chat(m.llm_providers.base_url!, apiKey, m.model_id, messages, { temperature, maxTokens: step.max_tokens ?? 500, json: isBio });
-                    await logResponse({ stepId: step.id, modelId: m.id, promptSent: describeMessages(messages), temperature, call, text: call.ok ? call.text : undefined, usage: call.ok ? call.usage : undefined });
-                    if (!call.ok) return await fail(502, { error: 'AI request failed.', detail: call.detail });
-
-                    if (isBio) {
-                        let bio: Parsed;
-                        try {
-                            bio = JSON.parse(cleanText(call.text));
-                        } catch {
-                            return await fail(502, { error: 'Could not parse AI response.', raw: call.text });
-                        }
-                        outputs.name = bio.name ?? '';
-                        outputs.bio = bio.bio ?? '';
-                    } else {
-                        outputs[step.output_key] = cleanText(call.text);
-                    }
-                    if (isBio) textModel = m.model_id;
-                    if (isBio || step.output_key === 'tip') textPrompts.push(describeMessages(messages));
-                    complete(step.name);
-                }
+                const run = await runSteps(supabase, steps, { neighborhood, vibe, location, inputImageUrl, extra }, { begin, complete, log: logResponse });
+                if (!run.ok) return await fail(run.status, { error: run.error, detail: run.detail, raw: run.raw });
+                const { outputs, textPrompts, textModel } = run;
+                imagePrompt = run.imagePrompt;
 
                 const finalImage = kind === 'generated' ? outputs.image_url : inputImageUrl;
                 if (!finalImage) return await fail(502, { error: 'Image generation failed.', detail: 'No image step produced an image.' });
@@ -463,8 +210,8 @@ export async function POST(request: Request) {
                     image_prompt: imagePrompt,
                     model,
                     cat_name: parsed.name,
-                    bio: parsed.bio,
-                    tip: fitRoast(parsed.roast),
+                    bio: fitText(parsed.bio, TEXT_LIMITS.bio),
+                    tip: fitText(parsed.roast, TEXT_LIMITS.tip),
                     // Drafts stay private to their owner until they hit "Post it" in the preview.
                     is_published: false,
                 })

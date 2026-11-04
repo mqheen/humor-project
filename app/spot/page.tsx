@@ -322,6 +322,7 @@ function Preview({ result, onUpdate, onRoastAgain, onDiscarded }: {
                 imageUrl={result.image_url}
                 alt={result.cat_name}
                 kindTag="Draft"
+                clampBio={!editing}
                 place={result.neighborhood ?? result.location}
                 media={(
                     <>

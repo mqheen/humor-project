@@ -2,11 +2,11 @@ import Link from 'next/link';
 import { createClient } from '@/app/lib/supabase/server';
 import Storefront from '@/app/components/Storefront';
 import InfoTip from '@/app/components/InfoTip';
-import { ROAST_HELP } from '@/app/components/CatCard';
+import { BIO_HELP, ROAST_HELP } from '@/app/components/CatCard';
 import { NEIGHBORHOODS } from '@/app/lib/nyc';
 
 type Row = {
-    id: number; image_url: string; cat_name: string; tip: string | null; neighborhood: string; created_at: string;
+    id: number; image_url: string; cat_name: string; bio: string; tip: string | null; neighborhood: string; created_at: string;
     votes: { value: number }[];
 };
 type Cat = Row & { score: number; ups: number };
@@ -17,7 +17,7 @@ export default async function NeighborhoodsPage() {
     // One query: published cats with their votes, grouped by neighborhood below. Drafts never count.
     const { data } = await supabase
         .from('generations')
-        .select('id, image_url, cat_name, tip, neighborhood, created_at, votes(value)')
+        .select('id, image_url, cat_name, bio, tip, neighborhood, created_at, votes(value)')
         .eq('is_published', true)
         .not('neighborhood', 'is', null);
 
@@ -73,6 +73,8 @@ export default async function NeighborhoodsPage() {
                                                     <p className="board-roast">{h.top.tip}</p>
                                                 </>
                                             )}
+                                            <p className="card-label">Bio <InfoTip text={BIO_HELP} label="About the bio" /></p>
+                                            <p className="board-bio">{h.top.bio}</p>
                                         </div>
                                     </div>
                                 )}

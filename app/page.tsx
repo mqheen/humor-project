@@ -13,11 +13,11 @@ type Row = {
     votes: Vote[];
 };
 type Featured = {
-    id: number; image_url: string; cat_name: string; bio: string; neighborhood: string | null; location: string | null; tip: string | null;
+    id: number; image_url: string; cat_name: string; neighborhood: string | null; location: string | null; tip: string | null;
     votes: Vote[];
 };
 
-const FEATURED_FIELDS = 'id, image_url, cat_name, bio, neighborhood, location, tip, created_at, votes(value, user_id)';
+const FEATURED_FIELDS = 'id, image_url, cat_name, neighborhood, location, tip, created_at, votes(value, user_id)';
 
 // Every query here filters is_published = true: RLS lets owners see their own drafts, and drafts must never reach the feed.
 export default async function Home({ searchParams }: { searchParams: Promise<{ sort?: string; neighborhood?: string; hood?: string }> }) {
@@ -180,7 +180,6 @@ function CatOfTheDay({ cat, userId }: { cat: Featured; userId: string | null }) 
                 alt={cat.cat_name}
                 name={cat.cat_name}
                 place={cat.neighborhood ?? cat.location}
-                bio={cat.bio}
                 roast={cat.tip}
                 footer={(
                     <div className="cotd-votes">

@@ -117,11 +117,18 @@ button, input, select { font: inherit; color: inherit; }
 
 /* Homepage sign: headline left, Cat of the Day flyer right (stacks on phones) */
 .sign-wide { max-width: none; }
-.sign-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 290px); gap: 2rem 2.5rem; align-items: center; }
+.sign-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 320px); gap: 2rem 2.5rem; align-items: center; }
 .sign-wide h1 { font-size: clamp(2.3rem, 5.5vw, 3.8rem); }
-.cotd-wrap { position: relative; transform: rotate(1.5deg); }
-.sign .card.cotd { transform: none; }
-.cotd-votes { margin-top: 0.9rem; padding-top: 0.75rem; border-top: 1.5px dashed var(--rule); }
+/* Cat of the Day never outgrows the hero text beside it: the card fills its grid cell without sizing it,
+   and the photo takes whatever height the details leave. Phones stack, so the card flows normally there. */
+.cotd-wrap { position: relative; align-self: stretch; min-height: 260px; transform: rotate(1.5deg); }
+.sign .card.cotd { position: absolute; inset: 0; display: flex; flex-direction: column; transform: none; }
+.cotd img { flex: 1 1 0; min-height: 72px; width: calc(100% - 12px); aspect-ratio: auto; object-fit: cover; }
+.cotd .card-body { flex: none; padding: 0.65rem 0.9rem 0.8rem; }
+.cotd .card-title { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; }
+.cotd .cat-roast { margin: 0.5rem 0 0; }
+.cotd .cat-roast .card-text { font-size: 0.9rem; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+.cotd-votes { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1.5px dashed var(--rule); }
 .cotd::before { display: none; } /* the label stands in for the tape */
 .cotd .card-name { font-size: 1.25rem; }
 .cotd-label {
@@ -180,7 +187,10 @@ button, input, select { font: inherit; color: inherit; }
 .card-name { margin: 0; font-size: 1.45rem; }
 .card-meta { font-size: 0.9rem; color: var(--muted-ink); white-space: nowrap; }
 .card-bio, .cat-roast { margin: 0.8rem 0 0.9rem; }
-.card-bio .card-text { font-size: 0.95rem; line-height: 1.55; color: var(--muted-ink); }
+.card-bio { margin-top: 0.6rem; }
+.card-bio .card-text { font-size: 0.85rem; line-height: 1.45; color: var(--muted-ink); }
+/* The roast is the headline; the bio is a two-line caption under it. */
+.card-text.clamp, .board-bio { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .card-body > .card-bio:last-child, .card-body > .cat-roast:last-child { margin-bottom: 0; }
 .card-label { display: flex; align-items: center; gap: 0.35rem; margin: 0 0 0.2rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-ink); }
 .card-label-roast { color: var(--ink); }
@@ -188,7 +198,7 @@ button, input, select { font: inherit; color: inherit; }
 .title-badge { padding: 0.05rem 0.45rem; border: 1.5px solid var(--ink); border-radius: 999px; background: var(--mint); color: var(--ink); font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
 
 /* The roast: paw bullet on the label, display font */
-.cat-roast .card-text { font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 0.95rem; line-height: 1.4; }
+.cat-roast .card-text { font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 1.1rem; line-height: 1.3; letter-spacing: -0.01em; }
 .cat-roast-paw { flex-shrink: 0; }
 
 /* ⓘ hint bubble: hover and focus show it; InfoTip.tsx adds data-dismissed on Escape */
@@ -338,6 +348,7 @@ select.input { appearance: none; padding-right: 2.5rem; cursor: pointer; backgro
 .edit-name, .edit-text { width: 100%; padding: 0.5rem 0.7rem; border-radius: 8px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); }
 .edit-name { font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.3rem; letter-spacing: -0.03em; }
 .edit-text { resize: vertical; min-height: 5.5rem; line-height: 1.45; }
+.edit-text { font: inherit; }
 .edit-count { margin: 0.2rem 0 0; font-size: 0.78rem; color: var(--muted-ink); }
 .owner-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; padding-top: 0.75rem; border-top: 1.5px dashed var(--rule); }
 .owner-actions .btn { padding: 0.4rem 0.85rem; font-size: 0.9rem; }
@@ -362,6 +373,7 @@ select.input { appearance: none; padding-right: 2.5rem; cursor: pointer; backgro
 .board-top img { width: 72px; height: 54px; object-fit: cover; border: 1.5px solid var(--ink); border-radius: 3px; }
 .board-top .card-label { position: relative; z-index: 2; }
 .board-cat { margin: 0; font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.03em; }
+.board-bio { margin: 0; font-size: 0.82rem; line-height: 1.4; color: var(--muted-ink); }
 .board-roast { margin: 0; font-family: var(--font-display), sans-serif; font-weight: 700; font-size: 0.92rem; line-height: 1.35; }
 .board-make { position: relative; z-index: 2; font-weight: 700; }
 
@@ -374,7 +386,9 @@ select.input { appearance: none; padding-right: 2.5rem; cursor: pointer; backgro
   .sign::before, .sign::after { top: 9px; }
   .sign p { font-size: 1rem; }
   .sign-split { grid-template-columns: minmax(0, 1fr); }
-  .cotd-wrap { max-width: 320px; margin: 0.75rem auto 0.25rem; transform: rotate(1deg); }
+  .cotd-wrap { max-width: 320px; min-height: 0; margin: 0.75rem auto 0.25rem; transform: rotate(1deg); }
+  .sign .card.cotd { position: relative; inset: auto; }
+  .cotd img { flex: none; height: 150px; }
   .loyalty-punches { gap: 0.35rem; }
   .punch { width: 26px; height: 26px; }
   .punch svg { width: 16px; height: 16px; }

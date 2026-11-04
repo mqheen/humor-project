@@ -10,7 +10,10 @@ type Props = {
     name: React.ReactNode;
     place?: string | null;
     kindTag?: string;
-    bio: React.ReactNode;
+    // Optional: Cat of the Day shows the roast alone.
+    bio?: React.ReactNode;
+    // Bios are a two-line caption; the preview turns this off while the bio is being edited.
+    clampBio?: boolean;
     roast?: React.ReactNode;
     votes?: React.ReactNode;
     footer?: React.ReactNode;
@@ -25,7 +28,7 @@ type Props = {
 // The one flyer used on the feed, Cat of the Day, dashboard and preview. Slots are nodes so
 // callers can swap in inputs (editing) or a typed-out bio without this component owning state.
 export default function CatCard({
-    imageUrl, alt, name, place, kindTag, bio, roast, votes, footer, media,
+    imageUrl, alt, name, place, kindTag, bio, clampBio = true, roast, votes, footer, media,
     as: Tag = 'article', headingLevel = 2, nameId, className,
 }: Props) {
     const Heading = `h${headingLevel}` as 'h2' | 'h3';
@@ -41,10 +44,6 @@ export default function CatCard({
                     </div>
                     {votes}
                 </div>
-                <div className="card-bio">
-                    <p className="card-label">Bio <InfoTip text={BIO_HELP} label="About the bio" /></p>
-                    <div className="card-text">{bio}</div>
-                </div>
                 {roast ? (
                     <div className="cat-roast">
                         <p className="card-label card-label-roast">
@@ -52,6 +51,12 @@ export default function CatCard({
                             The roast <InfoTip text={ROAST_HELP} label="About the roast" />
                         </p>
                         <div className="card-text">{roast}</div>
+                    </div>
+                ) : null}
+                {bio ? (
+                    <div className="card-bio">
+                        <p className="card-label">Bio <InfoTip text={BIO_HELP} label="About the bio" /></p>
+                        <div className={`card-text${clampBio ? ' clamp' : ''}`}>{bio}</div>
                     </div>
                 ) : null}
                 {footer}
