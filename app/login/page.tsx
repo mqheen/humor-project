@@ -1,8 +1,10 @@
 'use client';
 
+import { use } from 'react';
 import { createClient } from '@/app/lib/supabase/client';
 
-export default function LoginPage() {
+export default function LoginPage({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
+    const { denied } = use(searchParams);
     const supabase = createClient();
 
     const signInWithGoogle = async () => {
@@ -17,6 +19,7 @@ export default function LoginPage() {
             <div className="panel" style={{ width: '100%', maxWidth: 400, textAlign: 'center' }}>
                 <h1 className="panel-title">Sign in</h1>
                 <p className="panel-lede" style={{ marginInline: 'auto' }}>Use your Google account to continue.</p>
+                {denied === '1' && <p className="error" role="alert">Sign-ups are currently limited. Ask Maheen to add your email.</p>}
                 <button onClick={signInWithGoogle} className="btn btn-block btn-lg">
                     <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
                         <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.5 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.3l7.8 6C12.3 13.5 17.7 9.5 24 9.5z"/>
