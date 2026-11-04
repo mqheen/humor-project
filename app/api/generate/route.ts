@@ -31,6 +31,18 @@ Keep it warm, not mean. No hashtags, no emojis.`;
 // we can fill cat_name and bio separately.
 const BIO_CONTRACT = `\n\nReturn ONLY a JSON object in this exact shape: {"name": "...", "bio": "..."}`;
 
+// Events written to the response, one JSON object per line.
+type StreamEvent =
+    | { steps: string[] }
+    | { step: string; status: 'running' | 'done' | 'failed' }
+    | { done: true; generation: unknown }
+    | { error: string; detail?: string; raw?: string; status: number };
+
+// Step names used when the chain can't be loaded; they match the seeded chain's names.
+const IMAGE_STEP = 'Draw the cat';
+const BIO_STEP = 'Write the bio';
+const TIP_STEP = 'Write the tip';
+
 type Parsed = { name?: string; bio?: string; tip?: string };
 
 // Keep tips under 160 characters: whole sentences if they fit, otherwise cut at a word.
@@ -245,199 +257,236 @@ export async function POST(request: Request) {
             .eq('id', requestId);
     };
 
-    const fail = async (status: number, payload: { error: string; detail?: string; raw?: string }) => {
-        await finish({ status: 'failed', error: payload.detail ? `${payload.error} ${payload.detail}`.slice(0, 4000) : payload.error });
-        return NextResponse.json(payload, { status });
-    };
+    const encoder = new TextEncoder();
+    const fallbackSteps = kind === 'generated' ? [IMAGE_STEP, BIO_STEP, TIP_STEP] : [BIO_STEP, TIP_STEP];
 
-    try {
-        const steps = await loadSteps(supabase, mix ?? null);
-        let parsed: Parsed;
-        let imageUrl: string;
-        let fullPrompt: string;
-        let imagePrompt: string | null = null;
-        let model: string;
-
-        if (steps) {
-            // Terms and examples are only read when a step needs them; cache per request.
-            const termCache = new Map<string, { term: string; weight: number }[]>();
-            const termsFor = async (category: string) => {
-                if (!termCache.has(category)) {
-                    const { data } = await supabase.from('terms').select('term, weight').eq('category', category).eq('is_active', true);
-                    termCache.set(category, data ?? []);
-                }
-                return termCache.get(category)!;
+    // Validation errors above are plain JSON with a status. Once the stream starts the status is
+    // already 200, so failures from here on arrive as a final {error} event instead.
+    const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+            // The client may have gone away; generation and logging still run to completion.
+            const send = (event: StreamEvent) => {
+                try { controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`)); } catch { /* stream closed */ }
             };
-            let examples: Record<string, string> | null = null;
-            const examplesFor = async () => {
-                if (!examples) {
-                    const { data } = await supabase
-                        .from('generation_examples')
-                        .select('kind, output, neighborhood')
-                        .eq('is_active', true)
-                        .in('kind', ['bio', 'tip']);
-                    // Prefer examples written for this neighborhood, then the rest.
-                    const rows = (data ?? []).sort((a, b) => Number(b.neighborhood === neighborhood) - Number(a.neighborhood === neighborhood));
-                    const format = (k: string) => rows.filter(r => r.kind === k).slice(0, 3).map(r => `- ${r.output}`).join('\n');
-                    examples = { 'examples.bio': format('bio'), 'examples.tip': format('tip') };
-                }
-                return examples;
+            const running = new Set<string>();
+            const begin = (step: string) => { running.add(step); send({ step, status: 'running' }); };
+            const complete = (step: string) => { running.delete(step); send({ step, status: 'done' }); };
+
+            const fail = async (status: number, payload: { error: string; detail?: string; raw?: string }) => {
+                await finish({ status: 'failed', error: payload.detail ? `${payload.error} ${payload.detail}`.slice(0, 4000) : payload.error });
+                for (const step of running) send({ step, status: 'failed' });
+                running.clear();
+                send({ ...payload, status });
             };
 
-            const outputs: Record<string, string> = {};
-            const textPrompts: string[] = [];
-            let textModel: string | null = null;
+        try {
+            const steps = await loadSteps(supabase, mix ?? null);
+            send({ steps: steps ? steps.map(s => s.name) : fallbackSteps });
+            let parsed: Parsed;
+            let imageUrl: string;
+            let fullPrompt: string;
+            let imagePrompt: string | null = null;
+            let model: string;
 
-            for (const step of steps) {
-                const m = step.llm_models;
-                const apiKey = process.env[m.llm_providers.api_key_env!];
-                if (!apiKey) return await fail(500, { error: `${m.llm_providers.api_key_env} is not set.` });
-
-                const tone = step.term_category ? pickWeighted(await termsFor(step.term_category))?.term ?? '' : '';
-                const vars: Record<string, string> = {
-                    neighborhood: neighborhood ?? 'New York City',
-                    vibe: vibe ?? '',
-                    location: location ?? '',
-                    tone,
-                    image_url: outputs.image_url ?? inputImageUrl ?? '',
-                    ...(step.prompt_template.includes('{{examples.') ? await examplesFor() : {}),
-                    ...Object.fromEntries(Object.entries(outputs).map(([k, v]) => [`prev.${k}`, v])),
+            if (steps) {
+                // Terms and examples are only read when a step needs them; cache per request.
+                const termCache = new Map<string, { term: string; weight: number }[]>();
+                const termsFor = async (category: string) => {
+                    if (!termCache.has(category)) {
+                        const { data } = await supabase.from('terms').select('term, weight').eq('category', category).eq('is_active', true);
+                        termCache.set(category, data ?? []);
+                    }
+                    return termCache.get(category)!;
+                };
+                let examples: Record<string, string> | null = null;
+                const examplesFor = async () => {
+                    if (!examples) {
+                        const { data } = await supabase
+                            .from('generation_examples')
+                            .select('kind, output, neighborhood')
+                            .eq('is_active', true)
+                            .in('kind', ['bio', 'tip']);
+                        // Prefer examples written for this neighborhood, then the rest.
+                        const rows = (data ?? []).sort((a, b) => Number(b.neighborhood === neighborhood) - Number(a.neighborhood === neighborhood));
+                        const format = (k: string) => rows.filter(r => r.kind === k).slice(0, 3).map(r => `- ${r.output}`).join('\n');
+                        examples = { 'examples.bio': format('bio'), 'examples.tip': format('tip') };
+                    }
+                    return examples;
                 };
 
-                if (m.kind === 'image') {
-                    let prompt = fill(step.prompt_template, vars);
-                    if (extra) prompt += ` ${extra}.`;
-                    const call = await makeImage(m.llm_providers.base_url!, apiKey, m.model_id, prompt);
-                    await logResponse({ stepId: step.id, modelId: m.id, promptSent: prompt, call, text: call.ok ? call.url : undefined });
-                    if (!call.ok) return await fail(502, { error: 'Image generation failed.', detail: call.detail });
-                    imagePrompt = prompt;
-                    outputs[step.output_key] = call.url;
-                    continue;
-                }
+                const outputs: Record<string, string> = {};
+                const textPrompts: string[] = [];
+                let textModel: string | null = null;
 
-                // Vision: attach the photo for vision models, or any step whose template asks for {{image_url}}.
-                const photo = vars.image_url && (m.kind === 'vision' || step.prompt_template.includes('{{image_url}}')) ? vars.image_url : null;
-                const isBio = step.output_key === 'bio';
-                let text = fill(step.prompt_template, photo ? { ...vars, image_url: '' } : vars).trim();
-                if (isBio) text += BIO_CONTRACT;
-                if (photo && !text) text = 'Here is the photo.';
+                for (const step of steps) {
+                    begin(step.name);
+                    const m = step.llm_models;
+                    const apiKey = process.env[m.llm_providers.api_key_env!];
+                    if (!apiKey) return await fail(500, { error: `${m.llm_providers.api_key_env} is not set.` });
 
-                const messages: Message[] = [];
-                if (step.system_prompt) messages.push({ role: 'system', content: fill(step.system_prompt, vars) });
-                messages.push({ role: 'user', content: photo ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: photo } }] : text });
+                    const tone = step.term_category ? pickWeighted(await termsFor(step.term_category))?.term ?? '' : '';
+                    const vars: Record<string, string> = {
+                        neighborhood: neighborhood ?? 'New York City',
+                        vibe: vibe ?? '',
+                        location: location ?? '',
+                        tone,
+                        image_url: outputs.image_url ?? inputImageUrl ?? '',
+                        ...(step.prompt_template.includes('{{examples.') ? await examplesFor() : {}),
+                        ...Object.fromEntries(Object.entries(outputs).map(([k, v]) => [`prev.${k}`, v])),
+                    };
 
-                const temperature = m.supports_temperature && step.temperature !== null ? Number(step.temperature) : undefined;
-                const call = await chat(m.llm_providers.base_url!, apiKey, m.model_id, messages, { temperature, maxTokens: step.max_tokens ?? 500, json: isBio });
-                await logResponse({ stepId: step.id, modelId: m.id, promptSent: describeMessages(messages), temperature, call, text: call.ok ? call.text : undefined, usage: call.ok ? call.usage : undefined });
-                if (!call.ok) return await fail(502, { error: 'AI request failed.', detail: call.detail });
-
-                if (isBio) {
-                    let bio: Parsed;
-                    try {
-                        bio = JSON.parse(cleanText(call.text));
-                    } catch {
-                        return await fail(502, { error: 'Could not parse AI response.', raw: call.text });
+                    if (m.kind === 'image') {
+                        let prompt = fill(step.prompt_template, vars);
+                        if (extra) prompt += ` ${extra}.`;
+                        const call = await makeImage(m.llm_providers.base_url!, apiKey, m.model_id, prompt);
+                        await logResponse({ stepId: step.id, modelId: m.id, promptSent: prompt, call, text: call.ok ? call.url : undefined });
+                        if (!call.ok) return await fail(502, { error: 'Image generation failed.', detail: call.detail });
+                        imagePrompt = prompt;
+                        outputs[step.output_key] = call.url;
+                        complete(step.name);
+                        continue;
                     }
-                    outputs.name = bio.name ?? '';
-                    outputs.bio = bio.bio ?? '';
-                } else {
-                    outputs[step.output_key] = cleanText(call.text);
+
+                    // Vision: attach the photo for vision models, or any step whose template asks for {{image_url}}.
+                    const photo = vars.image_url && (m.kind === 'vision' || step.prompt_template.includes('{{image_url}}')) ? vars.image_url : null;
+                    const isBio = step.output_key === 'bio';
+                    let text = fill(step.prompt_template, photo ? { ...vars, image_url: '' } : vars).trim();
+                    if (isBio) text += BIO_CONTRACT;
+                    if (photo && !text) text = 'Here is the photo.';
+
+                    const messages: Message[] = [];
+                    if (step.system_prompt) messages.push({ role: 'system', content: fill(step.system_prompt, vars) });
+                    messages.push({ role: 'user', content: photo ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: photo } }] : text });
+
+                    const temperature = m.supports_temperature && step.temperature !== null ? Number(step.temperature) : undefined;
+                    const call = await chat(m.llm_providers.base_url!, apiKey, m.model_id, messages, { temperature, maxTokens: step.max_tokens ?? 500, json: isBio });
+                    await logResponse({ stepId: step.id, modelId: m.id, promptSent: describeMessages(messages), temperature, call, text: call.ok ? call.text : undefined, usage: call.ok ? call.usage : undefined });
+                    if (!call.ok) return await fail(502, { error: 'AI request failed.', detail: call.detail });
+
+                    if (isBio) {
+                        let bio: Parsed;
+                        try {
+                            bio = JSON.parse(cleanText(call.text));
+                        } catch {
+                            return await fail(502, { error: 'Could not parse AI response.', raw: call.text });
+                        }
+                        outputs.name = bio.name ?? '';
+                        outputs.bio = bio.bio ?? '';
+                    } else {
+                        outputs[step.output_key] = cleanText(call.text);
+                    }
+                    if (isBio) textModel = m.model_id;
+                    if (isBio || step.output_key === 'tip') textPrompts.push(describeMessages(messages));
+                    complete(step.name);
                 }
-                if (isBio) textModel = m.model_id;
-                if (isBio || step.output_key === 'tip') textPrompts.push(describeMessages(messages));
-            }
 
-            const finalImage = kind === 'generated' ? outputs.image_url : inputImageUrl;
-            if (!finalImage) return await fail(502, { error: 'Image generation failed.', detail: 'No image step produced an image.' });
-            parsed = { name: outputs.name, bio: outputs.bio, tip: outputs.tip };
-            imageUrl = finalImage;
-            fullPrompt = textPrompts.join('\n\n---\n\n');
-            model = textModel ?? steps.find(s => s.llm_models.kind !== 'image')?.llm_models.model_id ?? FALLBACK_MODEL;
-        } else {
-            // Fallback: the original hardcoded prompts, still logged against the request.
-            const apiKey = process.env.GROQ_API_KEY;
-            if (!apiKey) return await fail(500, { error: 'GROQ_API_KEY is not set.' });
-            model = FALLBACK_MODEL;
-            let text: string;
-
-            if (kind === 'generated') {
-                const falKey = process.env.FAL_KEY;
-                if (!falKey) return await fail(500, { error: 'FAL_KEY is not set.' });
-
-                imagePrompt = `A candid photo of a cat in ${neighborhood}, New York City. ${vibe} vibe. ${extra ? `${extra}. ` : ''}Natural light, street photography, shallow depth of field, no text, no watermark.`;
-                fullPrompt = `You are writing a profile for an AI-made cat that lives in ${neighborhood}, New York City. Its vibe: ${vibe}.`
-                    + (extra ? `\nExtra detail from the person who made it: ${extra}` : '')
-                    + `\n\n${profileRules(neighborhood!, vibe!)}`;
-
-                // Image and text don't depend on each other, so run them together.
-                const messages: Message[] = [{ role: 'user', content: fullPrompt }];
-                const [image, groq] = await Promise.all([
-                    makeImage(FAL_BASE_URL, falKey, FALLBACK_IMAGE_MODEL, imagePrompt),
-                    chat(GROQ_BASE_URL, apiKey, FALLBACK_MODEL, messages, { temperature: 0.9, maxTokens: 500, json: true }),
-                ]);
-                await logResponse({ stepId: null, modelId: null, promptSent: imagePrompt, call: image, text: image.ok ? image.url : undefined });
-                await logResponse({ stepId: null, modelId: null, promptSent: describeMessages(messages), temperature: 0.9, call: groq, text: groq.ok ? groq.text : undefined, usage: groq.ok ? groq.usage : undefined });
-                if (!image.ok) return await fail(502, { error: 'Image generation failed.', detail: image.detail });
-                if (!groq.ok) return await fail(502, { error: 'AI request failed.', detail: groq.detail });
-                imageUrl = image.url;
-                text = groq.text;
+                const finalImage = kind === 'generated' ? outputs.image_url : inputImageUrl;
+                if (!finalImage) return await fail(502, { error: 'Image generation failed.', detail: 'No image step produced an image.' });
+                parsed = { name: outputs.name, bio: outputs.bio, tip: outputs.tip };
+                imageUrl = finalImage;
+                fullPrompt = textPrompts.join('\n\n---\n\n');
+                model = textModel ?? steps.find(s => s.llm_models.kind !== 'image')?.llm_models.model_id ?? FALLBACK_MODEL;
             } else {
-                imageUrl = inputImageUrl!;
-                fullPrompt = `${SPOTTED_INTRO}\n\n${profileRules(neighborhood ?? 'New York City')}`
-                    + (location ? `\n\nWhere it was spotted: ${location}` : '');
-                const messages: Message[] = [{
-                    role: 'user',
-                    content: [
-                        { type: 'text', text: fullPrompt },
-                        { type: 'image_url', image_url: { url: imageUrl } },
-                    ],
-                }];
-                const groq = await chat(GROQ_BASE_URL, apiKey, FALLBACK_MODEL, messages, { temperature: 0.9, maxTokens: 500, json: true });
-                await logResponse({ stepId: null, modelId: null, promptSent: describeMessages(messages), temperature: 0.9, call: groq, text: groq.ok ? groq.text : undefined, usage: groq.ok ? groq.usage : undefined });
-                if (!groq.ok) return await fail(502, { error: 'AI request failed.', detail: groq.detail });
-                text = groq.text;
+                // Fallback: the original hardcoded prompts, still logged against the request.
+                const apiKey = process.env.GROQ_API_KEY;
+                if (!apiKey) return await fail(500, { error: 'GROQ_API_KEY is not set.' });
+                model = FALLBACK_MODEL;
+                let text: string;
+
+                if (kind === 'generated') {
+                    const falKey = process.env.FAL_KEY;
+                    if (!falKey) return await fail(500, { error: 'FAL_KEY is not set.' });
+
+                    imagePrompt = `A candid photo of a cat in ${neighborhood}, New York City. ${vibe} vibe. ${extra ? `${extra}. ` : ''}Natural light, street photography, shallow depth of field, no text, no watermark.`;
+                    fullPrompt = `You are writing a profile for an AI-made cat that lives in ${neighborhood}, New York City. Its vibe: ${vibe}.`
+                        + (extra ? `\nExtra detail from the person who made it: ${extra}` : '')
+                        + `\n\n${profileRules(neighborhood!, vibe!)}`;
+
+                    // Image and text don't depend on each other, so run them together.
+                    begin(IMAGE_STEP);
+                    begin(BIO_STEP);
+                    begin(TIP_STEP);
+                    const messages: Message[] = [{ role: 'user', content: fullPrompt }];
+                    const [image, groq] = await Promise.all([
+                        makeImage(FAL_BASE_URL, falKey, FALLBACK_IMAGE_MODEL, imagePrompt),
+                        chat(GROQ_BASE_URL, apiKey, FALLBACK_MODEL, messages, { temperature: 0.9, maxTokens: 500, json: true }),
+                    ]);
+                    await logResponse({ stepId: null, modelId: null, promptSent: imagePrompt, call: image, text: image.ok ? image.url : undefined });
+                    await logResponse({ stepId: null, modelId: null, promptSent: describeMessages(messages), temperature: 0.9, call: groq, text: groq.ok ? groq.text : undefined, usage: groq.ok ? groq.usage : undefined });
+                    if (image.ok) complete(IMAGE_STEP);
+                    if (!image.ok) return await fail(502, { error: 'Image generation failed.', detail: image.detail });
+                    if (!groq.ok) return await fail(502, { error: 'AI request failed.', detail: groq.detail });
+                    imageUrl = image.url;
+                    text = groq.text;
+                } else {
+                    imageUrl = inputImageUrl!;
+                    begin(BIO_STEP);
+                    begin(TIP_STEP);
+                    fullPrompt = `${SPOTTED_INTRO}\n\n${profileRules(neighborhood ?? 'New York City')}`
+                        + (location ? `\n\nWhere it was spotted: ${location}` : '');
+                    const messages: Message[] = [{
+                        role: 'user',
+                        content: [
+                            { type: 'text', text: fullPrompt },
+                            { type: 'image_url', image_url: { url: imageUrl } },
+                        ],
+                    }];
+                    const groq = await chat(GROQ_BASE_URL, apiKey, FALLBACK_MODEL, messages, { temperature: 0.9, maxTokens: 500, json: true });
+                    await logResponse({ stepId: null, modelId: null, promptSent: describeMessages(messages), temperature: 0.9, call: groq, text: groq.ok ? groq.text : undefined, usage: groq.ok ? groq.usage : undefined });
+                    if (!groq.ok) return await fail(502, { error: 'AI request failed.', detail: groq.detail });
+                    text = groq.text;
+                }
+
+                try {
+                    parsed = JSON.parse(text);
+                } catch {
+                    return await fail(502, { error: 'Could not parse AI response.', raw: text });
+                }
+                complete(BIO_STEP);
+                complete(TIP_STEP);
             }
 
-            try {
-                parsed = JSON.parse(text);
-            } catch {
-                return await fail(502, { error: 'Could not parse AI response.', raw: text });
+            if (!parsed.name || !parsed.bio || !parsed.tip) {
+                return await fail(502, { error: 'AI response was incomplete.', raw: JSON.stringify(parsed) });
             }
+
+            const { data, error } = await supabase
+                .from('generations')
+                .insert({
+                    user_id: user.id,
+                    image_url: imageUrl,
+                    kind,
+                    neighborhood,
+                    location,
+                    prompt: fullPrompt,
+                    image_prompt: imagePrompt,
+                    model,
+                    cat_name: parsed.name,
+                    bio: parsed.bio,
+                    tip: fitTip(parsed.tip),
+                })
+                .select()
+                .single();
+
+            if (error) {
+                return await fail(500, { error: error.message });
+            }
+
+            await finish({ status: 'succeeded', generation_id: data.id });
+
+            // Posting counts as activity for the daily streak. Best effort: errors are ignored.
+            await supabase.rpc('touch_streak');
+
+            send({ done: true, generation: data });
+        } catch (err) {
+            return await fail(500, { error: 'Something went wrong.', detail: err instanceof Error ? err.message : String(err) });
+        } finally {
+            controller.close();
         }
+        },
+    });
 
-        if (!parsed.name || !parsed.bio || !parsed.tip) {
-            return await fail(502, { error: 'AI response was incomplete.', raw: JSON.stringify(parsed) });
-        }
-
-        const { data, error } = await supabase
-            .from('generations')
-            .insert({
-                user_id: user.id,
-                image_url: imageUrl,
-                kind,
-                neighborhood,
-                location,
-                prompt: fullPrompt,
-                image_prompt: imagePrompt,
-                model,
-                cat_name: parsed.name,
-                bio: parsed.bio,
-                tip: fitTip(parsed.tip),
-            })
-            .select()
-            .single();
-
-        if (error) {
-            return await fail(500, { error: error.message });
-        }
-
-        await finish({ status: 'succeeded', generation_id: data.id });
-
-        // Posting counts as activity for the daily streak. Best effort: errors are ignored.
-        await supabase.rpc('touch_streak');
-
-        return NextResponse.json(data);
-    } catch (err) {
-        return await fail(500, { error: 'Something went wrong.', detail: err instanceof Error ? err.message : String(err) });
-    }
+    return new Response(stream, {
+        headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache, no-transform' },
+    });
 }

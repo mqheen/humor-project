@@ -8,6 +8,23 @@ import { NEIGHBORHOODS, VIBES } from '@/app/lib/nyc';
 import PawIcon from '@/app/components/PawIcon';
 import CatTip from '@/app/components/CatTip';
 
+type StepStatus = 'pending' | 'running' | 'done' | 'failed';
+type StepState = { name: string; status: StepStatus };
+
+// One JSON object per line from /api/generate. Mirrors StreamEvent in the route.
+type GenerateEvent =
+    | { steps: string[] }
+    | { step: string; status: Exclude<StepStatus, 'pending'> }
+    | { done: true; generation: Generation }
+    | { error: string };
+
+const STEP_LABELS: Record<string, string> = {
+    'Draw the cat': 'Drawing the cat',
+    'Look at the photo': 'Looking at the photo',
+    'Write the bio': 'Writing the bio',
+    'Write the tip': 'Writing the tip',
+};
+
 type Generation = {
     id: number; image_url: string; cat_name: string; bio: string; location: string | null;
     kind: 'spotted' | 'generated'; neighborhood: string | null; tip: string | null;
@@ -28,6 +45,7 @@ function Spot() {
     const [status, setStatus] = useState<'idle' | 'uploading' | 'generating'>('idle');
     const [error, setError] = useState('');
     const [result, setResult] = useState<Generation | null>(null);
+    const [steps, setSteps] = useState<StepState[]>([]);
 
     // Spot a cat
     const [file, setFile] = useState<File | null>(null);
@@ -57,16 +75,53 @@ function Spot() {
 
     const callGenerate = async (payload: object) => {
         setStatus('generating');
-        const res = await fetch('/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-        const json = await res.json();
-        if (!res.ok) { setError(json.error || 'Something went wrong.'); setStatus('idle'); return; }
+        setSteps([]);
+        const fail = (message: string) => { setError(message); setStatus('idle'); };
 
-        setResult(json);
-        setStatus('idle');
+        try {
+            const res = await fetch('/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            // Auth and validation errors come back as a plain JSON body with a status code.
+            if (!res.ok || !res.body) {
+                const json = await res.json().catch(() => ({}));
+                return fail(json.error || 'Something went wrong.');
+            }
+
+            const onEvent = (event: GenerateEvent): boolean => {
+                if ('steps' in event) {
+                    setSteps(event.steps.map((name) => ({ name, status: 'pending' })));
+                } else if ('step' in event) {
+                    setSteps((prev) => prev.map((s) => (s.name === event.step ? { ...s, status: event.status } : s)));
+                } else if ('done' in event) {
+                    setResult(event.generation);
+                    setStatus('idle');
+                    return true;
+                } else {
+                    fail(event.error || 'Something went wrong.');
+                    return true;
+                }
+                return false;
+            };
+
+            const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+            let buffer = '';
+            for (;;) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += value;
+                const lines = buffer.split('\n');
+                buffer = lines.pop() ?? '';
+                for (const line of lines) {
+                    if (line.trim() && onEvent(JSON.parse(line))) return;
+                }
+            }
+            fail('The connection dropped before the cat was ready.');
+        } catch {
+            fail('Something went wrong.');
+        }
     };
 
     const spot = async () => {
@@ -95,7 +150,7 @@ function Spot() {
     const reset = () => {
         setFile(null); setPreview(''); setLocation(''); setSpotHood('');
         setExtra('');
-        setResult(null); setError('');
+        setResult(null); setError(''); setSteps([]);
     };
 
     const busy = status !== 'idle';
@@ -138,10 +193,11 @@ function Spot() {
                                     <input className="input" value={extra} onChange={(e) => setExtra(e.target.value)} maxLength={80} placeholder="Orange tabby, wears a tiny MetroCard" />
                                 </label>
 
+                                <GenerationProgress steps={steps} />
                                 {error && <p className="error" role="alert">{error}</p>}
 
                                 <button type="submit" disabled={!hood || !vibe || busy} className="btn btn-primary btn-block">
-                                    {busy ? <WalkingPaws /> : 'Make this cat'}
+                                    {busy ? 'Making your cat…' : 'Make this cat'}
                                 </button>
                             </form>
                         ) : (
@@ -173,10 +229,11 @@ function Spot() {
                                     <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Bodega on 110th & Amsterdam" />
                                 </label>
 
+                                <GenerationProgress steps={steps} />
                                 {error && <p className="error" role="alert">{error}</p>}
 
                                 <button onClick={spot} disabled={!file || busy} className="btn btn-primary btn-block">
-                                    {status === 'uploading' ? 'Uploading…' : status === 'generating' ? <WalkingPaws /> : 'Generate bio'}
+                                    {status === 'uploading' ? 'Uploading…' : status === 'generating' ? 'Writing its story…' : 'Generate bio'}
                                 </button>
                             </>
                         )}
@@ -211,6 +268,22 @@ function Result({ result, onReset }: { result: Generation; onReset: () => void }
                 <button onClick={onReset} className="btn" style={{ flex: 1 }}>Post another</button>
             </div>
         </>
+    );
+}
+
+// Flyer-style checklist that ticks off each prompt-chain step as the route reports it.
+function GenerationProgress({ steps }: { steps: StepState[] }) {
+    if (!steps.length) return null;
+    return (
+        <ol className="progress-card" role="status" aria-label="Progress">
+            {steps.map((s) => (
+                <li key={s.name} className={`progress-step ${s.status}`}>
+                    <span className="progress-box" aria-hidden="true">{s.status === 'done' ? '✓' : s.status === 'failed' ? '✕' : ''}</span>
+                    <span>{STEP_LABELS[s.name] ?? s.name}</span>
+                    <span className="sr-only">{s.status === 'done' ? ' (done)' : s.status === 'failed' ? ' (failed)' : s.status === 'running' ? ' (in progress)' : ''}</span>
+                </li>
+            ))}
+        </ol>
     );
 }
 
