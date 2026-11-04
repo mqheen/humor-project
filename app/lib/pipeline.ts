@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export type Content = string | { type: string; text?: string; image_url?: { url: string } }[];
 export type Message = { role: 'system' | 'user'; content: Content };
 export type Usage = { prompt_tokens?: number; completion_tokens?: number };
-export type Call<T> = { latencyMs: number; raw: unknown } & (({ ok: true } & T) | { ok: false; detail: string });
+export type Call<T> = { latencyMs: number; raw: unknown } & (({ ok: true } & T) | { ok: false; detail: string; httpStatus?: number });
 
 // The bio step's template asks for "your name and a bio" in prose; this pins the shape so
 // we can fill cat_name and bio separately.
@@ -29,6 +29,22 @@ export function cleanText(text: string) {
     return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim().replace(/^["“]([\s\S]*)["”]$/, '$1').trim();
 }
 
+// The bio step asks for JSON, but without response_format a model may fence it or answer in the
+// template's own "Name: <name>. <sentence>" shape. Accept all three; plain text becomes the bio alone.
+function parseBio(text: string): { name: string; bio: string } | null {
+    const t = cleanText(text);
+    const json = t.match(/\{[\s\S]*\}/)?.[0];
+    if (json) {
+        try {
+            const o = JSON.parse(json) as { name?: unknown; bio?: unknown };
+            if (typeof o.bio === 'string') return { name: typeof o.name === 'string' ? o.name : '', bio: o.bio };
+        } catch { /* fall through to plain text */ }
+    }
+    const named = t.match(/^Name:\s*(.+?)\.\s+([\s\S]+)$/i);
+    if (named) return { name: named[1].trim(), bio: named[2].trim() };
+    return t ? { name: '', bio: t } : null;
+}
+
 function parseRaw(text: string): unknown {
     try { return JSON.parse(text); } catch { return { raw: text }; }
 }
@@ -45,6 +61,8 @@ export async function chat(baseUrl: string, apiKey: string, model: string, messa
             model,
             ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
             max_completion_tokens: opts.maxTokens,
+            // gpt-oss models spend the token budget on hidden reasoning unless told not to.
+            ...(model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' } : {}),
             ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
             messages,
         }),
@@ -52,7 +70,7 @@ export async function chat(baseUrl: string, apiKey: string, model: string, messa
     const body = await res.text();
     const latencyMs = Date.now() - started;
     const raw = parseRaw(body);
-    if (!res.ok) return { ok: false, detail: body, latencyMs, raw };
+    if (!res.ok) return { ok: false, detail: body, httpStatus: res.status, latencyMs, raw };
     const json = raw as { choices?: { message?: { content?: string } }[]; usage?: Usage };
     return { ok: true, text: json?.choices?.[0]?.message?.content ?? '', usage: json?.usage ?? {}, latencyMs, raw };
 }
@@ -198,7 +216,8 @@ export type RunOptions = {
 
 export type RunResult =
     | { ok: true; outputs: Record<string, string>; imagePrompt: string | null; textPrompts: string[]; textModel: string | null }
-    | { ok: false; status: number; error: string; detail?: string; raw?: string };
+    // upstreamStatus is the model provider's HTTP status when it rejected the call (429 means rate limited).
+    | { ok: false; status: number; error: string; detail?: string; raw?: string; upstreamStatus?: number };
 
 // Runs the steps in order, each one seeing earlier outputs as {{prev.<key>}}.
 export async function runSteps(supabase: SupabaseClient, steps: ReadyStep[], inputs: RunInputs, opts: RunOptions = {}): Promise<RunResult> {
@@ -277,19 +296,24 @@ export async function runSteps(supabase: SupabaseClient, steps: ReadyStep[], inp
         messages.push({ role: 'user', content: photo ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: photo } }] : text });
 
         const temperature = m.supports_temperature && step.temperature !== null ? Number(step.temperature) : undefined;
-        const call = await chat(m.llm_providers.base_url!, apiKey, m.model_id, messages, { temperature, maxTokens: step.max_tokens ?? 500, json: isBio });
-        await opts.log?.({ stepId: step.id, modelId: m.id, promptSent: describeMessages(messages), temperature, call, text: call.ok ? call.text : undefined, usage: call.ok ? call.usage : undefined });
-        if (!call.ok) return { ok: false, status: 502, error: 'AI request failed.', detail: call.detail };
+        const attempt = async (json: boolean) => {
+            const result = await chat(m.llm_providers.base_url!, apiKey, m.model_id, messages, { temperature, maxTokens: step.max_tokens ?? 500, json });
+            await opts.log?.({ stepId: step.id, modelId: m.id, promptSent: describeMessages(messages), temperature, call: result, text: result.ok ? result.text : undefined, usage: result.ok ? result.usage : undefined });
+            return result;
+        };
+        let call = await attempt(isBio);
+        // JSON mode can fail validation, and reasoning models can spend the whole budget and return nothing.
+        // Retry the step once without response_format; the bio is then parsed from plain text.
+        const jsonRejected = !call.ok && call.detail.includes('json_validate_failed');
+        const empty = call.ok && !cleanText(call.text);
+        if (jsonRejected || empty) call = await attempt(false);
+        if (!call.ok) return { ok: false, status: 502, error: 'AI request failed.', detail: call.detail, upstreamStatus: call.httpStatus };
 
         if (isBio) {
-            let bio: { name?: string; bio?: string };
-            try {
-                bio = JSON.parse(cleanText(call.text));
-            } catch {
-                return { ok: false, status: 502, error: 'Could not parse AI response.', raw: call.text };
-            }
-            outputs.name = bio.name ?? '';
-            outputs.bio = bio.bio ?? '';
+            const bio = parseBio(call.text);
+            if (!bio) return { ok: false, status: 502, error: 'Could not parse AI response.', raw: call.text };
+            outputs.name = bio.name;
+            outputs.bio = bio.bio;
         } else {
             outputs[step.output_key] = cleanText(call.text);
         }

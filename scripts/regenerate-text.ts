@@ -81,41 +81,57 @@ if (!dryRun) {
 let updated = 0;
 const failed: string[] = [];
 
-for (const cat of cats) {
+// The provider's rate limits are tight, so space the cats out and give a 429 a full minute to clear.
+const PAUSE_BETWEEN_CATS_MS = 12_000;
+const RATE_LIMIT_WAIT_MS = 60_000;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+for (const [index, cat] of cats.entries()) {
+    if (index > 0) await sleep(PAUSE_BETWEEN_CATS_MS);
     const { mixId, steps } = chains.get(cat.kind)!;
     const neighborhood = isNeighborhood(cat.neighborhood) ? cat.neighborhood : null;
     const vibe = await vibeFor(cat);
     const inputs = { neighborhood, vibe, location: cat.location, inputImageUrl: cat.kind === 'spotted' ? cat.image_url : null, extra: '' };
     const label = `#${cat.id} ${cat.cat_name} (${neighborhood ?? cat.location ?? 'NYC'})`;
 
-    // Log it like any other generation, marked as a regeneration in inputs. Dry runs log nothing.
-    let requestId: number | null = null;
-    const startedAt = Date.now();
-    if (!dryRun) {
-        const { data } = await supabase
-            .from('generation_requests')
-            .insert({
-                user_id: cat.user_id, kind: cat.kind, mix_id: mixId, generation_id: cat.id, status: 'running',
-                inputs: { note: 'regenerate', neighborhood, vibe, image_url: cat.image_url },
-            })
-            .select('id')
-            .single();
-        requestId = data?.id ?? null;
-    }
-    const finish = async (patch: { status: 'succeeded' | 'failed'; error?: string }) => {
-        if (!requestId) return;
-        await supabase.from('generation_requests')
-            .update({ ...patch, finished_at: new Date().toISOString(), duration_ms: Date.now() - startedAt })
-            .eq('id', requestId);
+    // One attempt = one generation_requests row (marked as a regeneration in inputs) and one pass over the
+    // steps. Dry runs log nothing. Keep the picture (seed it) and skip image steps; the photo-description
+    // step for spotted cats still runs because the bio step reads it.
+    const attempt = async () => {
+        let requestId: number | null = null;
+        const startedAt = Date.now();
+        if (!dryRun) {
+            const { data } = await supabase
+                .from('generation_requests')
+                .insert({
+                    user_id: cat.user_id, kind: cat.kind, mix_id: mixId, generation_id: cat.id, status: 'running',
+                    inputs: { note: 'regenerate', neighborhood, vibe, image_url: cat.image_url },
+                })
+                .select('id')
+                .single();
+            requestId = data?.id ?? null;
+        }
+        const finish = async (patch: { status: 'succeeded' | 'failed'; error?: string }) => {
+            if (!requestId) return;
+            await supabase.from('generation_requests')
+                .update({ ...patch, finished_at: new Date().toISOString(), duration_ms: Date.now() - startedAt })
+                .eq('id', requestId);
+        };
+        const result = await runSteps(supabase, steps, inputs, {
+            skipImage: true,
+            seed: { image_url: cat.image_url },
+            log: makeResponseLogger(supabase, requestId),
+        });
+        return { run: result, finish };
     };
 
-    // Keep the picture (seed it) and skip image steps; the photo-description step for spotted cats still runs
-    // because the bio step reads it.
-    const run = await runSteps(supabase, steps, inputs, {
-        skipImage: true,
-        seed: { image_url: cat.image_url },
-        log: makeResponseLogger(supabase, requestId),
-    });
+    let { run, finish } = await attempt();
+    if (!run.ok && run.upstreamStatus === 429) {
+        console.log(`${label}\n  Rate limited. Waiting ${RATE_LIMIT_WAIT_MS / 1000}s, then trying once more.\n`);
+        await finish({ status: 'failed', error: 'Rate limited (429); retrying once.' });
+        await sleep(RATE_LIMIT_WAIT_MS);
+        ({ run, finish } = await attempt());
+    }
 
     const bio = run.ok ? fitText(run.outputs.bio ?? '', TEXT_LIMITS.bio) : '';
     const tip = run.ok ? fitText(run.outputs.tip ?? '', TEXT_LIMITS.tip) : '';
