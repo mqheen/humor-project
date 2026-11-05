@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/app/lib/supabase/client';
 import { scoreLabel } from '@/app/lib/votes';
@@ -14,12 +14,40 @@ type Props = {
     labeled?: boolean;
 };
 
+type Vote = 1 | -1 | null;
+type Entry = { score: number; vote: Vote; seedScore: number; seedVote: Vote };
+
+// One entry per cat, shared by every VoteButtons on the page. The same cat can be on screen twice (Cat of the
+// Day and its feed card); each used to keep its own copy of the vote, so voting on the second one inserted a
+// duplicate row, hit the unique (user_id, generation_id) constraint, and rolled back with no message.
+// An entry only applies while the server-rendered numbers it was seeded from are still the ones in the props;
+// when the server sends fresher numbers (refresh, navigation) the props win again.
+const entries = new Map<number, Entry>();
+const inflight = new Set<number>();
+const listeners = new Map<number, Set<() => void>>();
+
+const subscribeTo = (id: number) => (listener: () => void) => {
+    const set = listeners.get(id) ?? new Set();
+    set.add(listener);
+    listeners.set(id, set);
+    return () => { set.delete(listener); };
+};
+const publish = (id: number, entry: Entry) => {
+    entries.set(id, entry);
+    listeners.get(id)?.forEach((l) => l());
+};
+
 export default function VoteButtons({ generationId, initialScore, initialVote, userId, labeled = false }: Props) {
-    const supabase = createClient();
+    const supabase = useMemo(() => createClient(), []);
     const router = useRouter();
-    const [score, setScore] = useState(initialScore);
-    const [vote, setVote] = useState<1 | -1 | null>(initialVote);
-    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+
+    const subscribe = useMemo(() => subscribeTo(generationId), [generationId]);
+    const getSnapshot = useCallback(() => entries.get(generationId), [generationId]);
+    const shared = useSyncExternalStore(subscribe, getSnapshot, () => undefined);
+    const live = shared && shared.seedScore === initialScore && shared.seedVote === initialVote ? shared : null;
+    const score = live ? live.score : initialScore;
+    const vote = live ? live.vote : initialVote;
 
     // Motion-only state: which paw to stamp, and the outgoing score for the slide.
     const [stamp, setStamp] = useState<{ dir: 1 | -1; n: number } | null>(null);
@@ -34,31 +62,30 @@ export default function VoteButtons({ generationId, initialScore, initialVote, u
 
     const cast = async (value: 1 | -1) => {
         if (!userId) { router.push('/login'); return; }
-        if (busy) return;
-        setBusy(true);
+        if (inflight.has(generationId)) return;
+        inflight.add(generationId);
+        setError('');
 
-        const prev = vote;
-        const prevScore = score;
+        const before: Entry = { score, vote, seedScore: initialScore, seedVote: initialVote };
+        const next: Vote = vote === value ? null : value;
+        const delta = (next ?? 0) - (vote ?? 0);
+        publish(generationId, { ...before, score: score + delta, vote: next });
 
-        if (prev === value) {
-            setVote(null); setScore(score - value);
-            const { error } = await supabase.from('votes').delete().eq('generation_id', generationId).eq('user_id', userId);
-            if (error) { setVote(prev); setScore(prevScore); }
-        } else if (prev) {
-            setVote(value); setScore(score + 2 * value);
-            const { error } = await supabase.from('votes').update({ value }).eq('generation_id', generationId).eq('user_id', userId);
-            if (error) { setVote(prev); setScore(prevScore); }
-        } else {
-            setVote(value); setScore(score + value);
-            const { error } = await supabase.from('votes').insert({ generation_id: generationId, user_id: userId, value });
-            if (error) { setVote(prev); setScore(prevScore); }
+        // upsert covers both "first vote" and "change vote", so a stale local copy can't trip the unique constraint.
+        const { error: writeError } = next === null
+            ? await supabase.from('votes').delete().eq('generation_id', generationId).eq('user_id', userId)
+            : await supabase.from('votes').upsert({ generation_id: generationId, user_id: userId, value: next }, { onConflict: 'user_id,generation_id' });
+
+        if (writeError) {
+            publish(generationId, before);
+            setError('Your vote didn’t save. Try again.');
         }
-        setBusy(false);
+        inflight.delete(generationId);
     };
 
     // Stamp only when a vote is being cast, not when clicking the same paw to remove it.
     const press = (value: 1 | -1) => {
-        if (userId && !busy && vote !== value) setStamp({ dir: value, n: (stamp?.n ?? 0) + 1 });
+        if (userId && !inflight.has(generationId) && vote !== value) setStamp({ dir: value, n: (stamp?.n ?? 0) + 1 });
         cast(value);
     };
 
@@ -83,6 +110,7 @@ export default function VoteButtons({ generationId, initialScore, initialVote, u
                 <Paw key={`down-${stamp?.dir === -1 ? stamp.n : 0}`} down stamping={stamp?.dir === -1} />
                 {ring(-1)}
             </button>
+            {error && <span className="sr-only" role="alert">{error}</span>}
         </div>
     );
 }

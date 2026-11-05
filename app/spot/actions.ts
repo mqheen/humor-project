@@ -21,7 +21,8 @@ async function ownedBy(id: number): Promise<Owned> {
 }
 
 function refresh() {
-    for (const path of ['/', '/dashboard', '/profile', '/neighborhoods']) revalidatePath(path);
+    for (const path of ['/', '/dashboard', '/neighborhoods']) revalidatePath(path);
+    revalidatePath('/cat/[id]', 'page');
 }
 
 // created_at moves to the moment of posting so a draft finished days later still lands at the top of New.

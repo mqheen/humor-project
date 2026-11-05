@@ -50,6 +50,9 @@ const TITLES = [
 
 export const streakTitle = (streak: number) => TITLES.find((t) => streak >= t.at)!.title;
 
+// Lowest title first, for the ladder in the streak tooltip.
+export const STREAK_LADDER = [...TITLES].reverse();
+
 // The next title up and how many days it takes, or null at Mayor.
 export function nextMilestone(streak: number) {
     const next = [...TITLES].reverse().find((t) => t.at > streak);

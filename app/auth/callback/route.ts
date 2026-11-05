@@ -29,7 +29,7 @@ export async function GET(request: Request) {
                 .single();
 
             if (!profile?.first_name || !profile?.last_name) {
-                return NextResponse.redirect(`${origin}/profile`);
+                return NextResponse.redirect(`${origin}/dashboard?setup=1`);
             }
         }
 

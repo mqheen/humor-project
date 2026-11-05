@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import InfoTip from '@/app/components/InfoTip';
 import PawIcon from '@/app/components/PawIcon';
 
@@ -20,26 +21,28 @@ type Props = {
     // Replaces the default photo (the preview uses this for its "developing" placeholder).
     media?: React.ReactNode;
     as?: 'article' | 'aside';
-    headingLevel?: 2 | 3;
+    headingLevel?: 1 | 2 | 3;
     nameId?: string;
     className?: string;
+    // Links the photo and the name to the cat's own page.
+    href?: string;
 };
 
 // The one flyer used on the feed, Cat of the Day, dashboard and preview. Slots are nodes so
 // callers can swap in inputs (editing) or a typed-out bio without this component owning state.
 export default function CatCard({
     imageUrl, alt, name, place, kindTag, bio, clampBio = true, roast, votes, footer, media,
-    as: Tag = 'article', headingLevel = 2, nameId, className,
+    as: Tag = 'article', headingLevel = 2, nameId, className, href,
 }: Props) {
-    const Heading = `h${headingLevel}` as 'h2' | 'h3';
+    const Heading = `h${headingLevel}` as 'h1' | 'h2' | 'h3';
     return (
         <Tag className={`card${className ? ` ${className}` : ''}`} aria-labelledby={Tag === 'aside' ? nameId : undefined}>
-            {media ?? <img src={imageUrl} alt={alt} />}
+            {media ?? (href ? <Link href={href} className="card-photo-link" tabIndex={-1} aria-hidden="true"><img src={imageUrl} alt="" /></Link> : <img src={imageUrl} alt={alt} />)}
             <div className="card-body">
                 <div className="card-head">
                     <div className="card-title">
                         {kindTag && <span className="kind-tag">{kindTag}</span>}
-                        <Heading id={nameId} className="card-name">{name}</Heading>
+                        <Heading id={nameId} className="card-name">{href ? <Link href={href}>{name}</Link> : name}</Heading>
                         {place && <span className="sticker">{place}</span>}
                     </div>
                     {votes}

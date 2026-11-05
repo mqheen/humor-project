@@ -3,7 +3,8 @@
 import { useId, useState } from 'react';
 
 type Props = {
-    text: string;
+    // Phrasing content only (spans, text): the bubble is a <span>.
+    text: React.ReactNode;
     label?: string;
     align?: 'start' | 'end';
     // Wrap an existing focusable element instead of rendering the ⓘ button.

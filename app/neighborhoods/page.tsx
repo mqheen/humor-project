@@ -1,8 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@/app/lib/supabase/server';
 import Storefront from '@/app/components/Storefront';
-import InfoTip from '@/app/components/InfoTip';
-import { BIO_HELP, ROAST_HELP } from '@/app/components/CatCard';
 import { NEIGHBORHOODS } from '@/app/lib/nyc';
 
 type Row = {
@@ -55,6 +53,7 @@ export default async function NeighborhoodsPage() {
                     {ranked.map((h, i) => (
                         <li key={h.name} className="board-row">
                             <span className="board-rank" aria-label={`Rank ${i + 1}`}>{i + 1}</span>
+                            {h.top && <img className="board-thumb" src={h.top.image_url} alt="" />}
                             <div className="board-main">
                                 <h2 className="board-hood"><Link href={`/?${new URLSearchParams({ neighborhood: h.name })}`}>{h.name}</Link></h2>
                                 <p className="board-stats">
@@ -64,18 +63,8 @@ export default async function NeighborhoodsPage() {
                                 </p>
                                 {h.top && (
                                     <div className="board-top">
-                                        <img src={h.top.image_url} alt={h.top.cat_name} />
-                                        <div>
-                                            <p className="board-cat">{h.top.cat_name}</p>
-                                            {h.top.tip && (
-                                                <>
-                                                    <p className="card-label">The roast <InfoTip text={ROAST_HELP} label="About the roast" /></p>
-                                                    <p className="board-roast">{h.top.tip}</p>
-                                                </>
-                                            )}
-                                            <p className="card-label">Bio <InfoTip text={BIO_HELP} label="About the bio" /></p>
-                                            <p className="board-bio">{h.top.bio}</p>
-                                        </div>
+                                        <p className="board-cat">{h.top.cat_name}</p>
+                                        {h.top.tip && <p className="board-roast">{h.top.tip}</p>}
                                     </div>
                                 )}
                             </div>
@@ -84,7 +73,7 @@ export default async function NeighborhoodsPage() {
                     {empty.map((h) => (
                         <li key={h.name} className="board-row board-empty">
                             <span className="board-rank board-rank-none" aria-hidden="true">–</span>
-                            <div className="board-main">
+                            <div className="board-main board-main-wide">
                                 <h2 className="board-hood">{h.name}</h2>
                                 <p className="board-stats">
                                     <span>No cat yet</span>

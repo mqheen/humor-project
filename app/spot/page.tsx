@@ -7,6 +7,8 @@ import { createClient } from '@/app/lib/supabase/client';
 import { NEIGHBORHOODS, TEXT_LIMITS, VIBES, isNeighborhood } from '@/app/lib/nyc';
 import PawIcon from '@/app/components/PawIcon';
 import CatCard from '@/app/components/CatCard';
+import ConfirmDialog from '@/app/components/ConfirmDialog';
+import PostedOverlay from '@/app/components/PostedOverlay';
 import { discardGeneration, publishGeneration, updateGenerationText } from '@/app/spot/actions';
 
 type StepStatus = 'pending' | 'running' | 'done' | 'failed';
@@ -49,6 +51,8 @@ function Spot() {
     const [status, setStatus] = useState<'idle' | 'uploading' | 'generating'>('idle');
     const [error, setError] = useState('');
     const [result, setResult] = useState<Generation | null>(null);
+    // Set once "Post it" succeeds; shows the share overlay instead of redirecting straight away.
+    const [posted, setPosted] = useState<Generation | null>(null);
     const [steps, setSteps] = useState<StepState[]>([]);
     // What the last request was sent with, so "Roast again" reuses the same neighborhood/vibe or uploaded photo.
     const lastPayload = useRef<object | null>(null);
@@ -155,6 +159,7 @@ function Spot() {
     };
 
     const reset = () => {
+        setPosted(null);
         setFile(null); setPreview(''); setLocation(''); setSpotHood('');
         setHood(''); setVibe(''); setExtra('');
         setResult(null); setError(''); setSteps([]);
@@ -172,7 +177,7 @@ function Spot() {
         <main className="center-screen">
             <div className="panel" style={{ width: '100%', maxWidth: 520 }}>
                 {result ? (
-                    <Preview key={result.id} result={result} onUpdate={setResult} onRoastAgain={roastAgain} onDiscarded={reset} />
+                    <Preview key={result.id} result={result} onUpdate={setResult} onRoastAgain={roastAgain} onDiscarded={reset} onPosted={setPosted} />
                 ) : (
                     <>
                         <nav className="segmented tabs" aria-label="How to add a cat">
@@ -253,6 +258,7 @@ function Spot() {
                     </>
                 )}
             </div>
+            {posted && <PostedOverlay cat={posted} onFeed={() => router.push('/')} onAnother={reset} />}
         </main>
     );
 }
@@ -260,13 +266,13 @@ function Spot() {
 type Busy = 'post' | 'save' | 'again' | 'discard' | null;
 
 // Nothing is public yet: the generate route saved this as a draft, and only "Post it" publishes it.
-function Preview({ result, onUpdate, onRoastAgain, onDiscarded }: {
+function Preview({ result, onUpdate, onRoastAgain, onDiscarded, onPosted }: {
     result: Generation;
     onUpdate: (g: Generation) => void;
     onRoastAgain: () => void;
     onDiscarded: () => void;
+    onPosted: (g: Generation) => void;
 }) {
-    const router = useRouter();
     const made = result.kind === 'generated';
     // Generated images come from an external CDN and can be slow to arrive, so show a placeholder until loaded.
     const [loaded, setLoaded] = useState(!made);
@@ -275,6 +281,7 @@ function Preview({ result, onUpdate, onRoastAgain, onDiscarded }: {
     const [draft, setDraft] = useState({ cat_name: result.cat_name, bio: result.bio, tip: result.tip ?? '' });
     const [busy, setBusy] = useState<Busy>(null);
     const [error, setError] = useState('');
+    const [confirming, setConfirming] = useState<'again' | 'discard' | null>(null);
 
     // Runs a server action with the busy flag; returns whether it succeeded.
     const run = async (kind: Exclude<Busy, null>, action: () => Promise<{ ok: true } | { ok: false; error: string }>) => {
@@ -286,7 +293,7 @@ function Preview({ result, onUpdate, onRoastAgain, onDiscarded }: {
     };
 
     const post = async () => {
-        if (await run('post', () => publishGeneration(result.id))) router.push('/');
+        if (await run('post', () => publishGeneration(result.id))) { onPosted(result); setBusy(null); }
     };
     const save = async () => {
         if (!(await run('save', () => updateGenerationText(result.id, draft)))) return;
@@ -295,12 +302,17 @@ function Preview({ result, onUpdate, onRoastAgain, onDiscarded }: {
         setEditing(false);
         setBusy(null);
     };
+    // Both go through the confirm dialog first. The dialog closes whether or not the server action worked;
+    // a failure shows in the preview's error line.
     const again = async () => {
-        if (await run('again', () => discardGeneration(result.id))) onRoastAgain();
+        const ok = await run('again', () => discardGeneration(result.id));
+        setConfirming(null);
+        if (ok) onRoastAgain();
     };
     const discard = async () => {
-        if (!confirm('Throw this cat away?')) return;
-        if (await run('discard', () => discardGeneration(result.id))) onDiscarded();
+        const ok = await run('discard', () => discardGeneration(result.id));
+        setConfirming(null);
+        if (ok) onDiscarded();
     };
 
     const startEdit = () => {
@@ -367,11 +379,31 @@ function Preview({ result, onUpdate, onRoastAgain, onDiscarded }: {
                     <>
                         <button onClick={post} disabled={busy !== null || !loaded} className="btn btn-primary btn-lg">{busy === 'post' ? 'Posting…' : 'Post it'}</button>
                         <button onClick={startEdit} disabled={busy !== null} className="btn">Edit</button>
-                        <button onClick={again} disabled={busy !== null} className="btn">{busy === 'again' ? 'Starting over…' : 'Roast again'}</button>
-                        <button onClick={discard} disabled={busy !== null} className="btn">Discard</button>
+                        <button onClick={() => setConfirming('again')} disabled={busy !== null} className="btn">{busy === 'again' ? 'Starting over…' : 'Roast again'}</button>
+                        <button onClick={() => setConfirming('discard')} disabled={busy !== null} className="btn">Discard</button>
                     </>
                 )}
             </div>
+
+            <ConfirmDialog
+                open={confirming === 'discard'}
+                title="Throw this cat away?"
+                body="It will be deleted. Nobody has seen it yet."
+                confirmLabel="Throw it away"
+                busy={busy === 'discard'}
+                onCancel={() => setConfirming(null)}
+                onConfirm={discard}
+            />
+            <ConfirmDialog
+                open={confirming === 'again'}
+                title="Throw this one away and make another?"
+                body="This cat will be deleted and a new one made with the same settings."
+                confirmLabel="Throw it away"
+                cancelLabel="Keep this one"
+                busy={busy === 'again'}
+                onCancel={() => setConfirming(null)}
+                onConfirm={again}
+            />
         </div>
     );
 }

@@ -1,13 +1,15 @@
 import { createClient } from '@/app/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import ProfileCard from '@/app/components/ProfileCard';
 import LoyaltyPunches from '@/app/components/LoyaltyPunches';
 import CatCard from '@/app/components/CatCard';
 import OwnerActions from '@/app/components/OwnerActions';
 import { scoreLabel } from '@/app/lib/votes';
 import { liveStreak, nextMilestone, streakTitle } from '@/app/lib/nyc';
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ setup?: string }> }) {
+    const { setup } = await searchParams;
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) redirect('/login');
@@ -30,7 +32,6 @@ export default async function DashboardPage() {
     const posts = all.filter((g) => g.is_published);
     const totalScore = posts.reduce((s, p) => s + p.score, 0);
 
-    const name = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user.email;
     const streak = liveStreak(profile?.streak, profile?.last_active);
     const bestStreak = profile?.best_streak ?? 0;
     const next = nextMilestone(streak);
@@ -39,26 +40,19 @@ export default async function DashboardPage() {
 
     return (
         <main className="container" style={{ padding: '3rem 1.5rem 5rem' }}>
-            <div className="panel">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
-                    <div className="avatar avatar-lg">
-                        {profile?.avatar_url ? <img src={profile.avatar_url} alt={name ?? ''} /> : 'No photo'}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 200 }}>
-                        <h1 className="panel-title" style={{ marginBottom: '0.3rem' }}>Welcome, {name}</h1>
-                        <p className="muted" style={{ margin: 0 }}>{user.email}</p>
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                        <Link href="/spot" className="btn btn-primary">Make a cat</Link>
-                        <Link href="/profile" className="btn">Edit profile</Link>
-                    </div>
-                </div>
+            <ProfileCard
+                userId={user.id}
+                email={user.email ?? null}
+                firstName={profile?.first_name ?? ''}
+                lastName={profile?.last_name ?? ''}
+                avatarUrl={profile?.avatar_url ?? ''}
+                setup={setup === '1'}
+            />
 
-                <div className="stat-grid">
-                    <div className="stat"><p className="stat-label">Roasts you’ve posted</p><p className="stat-value">{posts.length}</p></div>
-                    <div className="stat"><p className="stat-label">Votes received</p><p className="stat-value">{totalScore > 0 ? `+${totalScore}` : totalScore}</p></div>
-                    <div className="stat"><p className="stat-label">Member since</p><p className="stat-value">{memberSince}</p></div>
-                </div>
+            <div className="stat-grid">
+                <div className="stat"><p className="stat-label">Roasts you’ve posted</p><p className="stat-value">{posts.length}</p></div>
+                <div className="stat"><p className="stat-label">Votes received</p><p className="stat-value">{totalScore > 0 ? `+${totalScore}` : totalScore}</p></div>
+                <div className="stat"><p className="stat-label">Member since</p><p className="stat-value">{memberSince}</p></div>
             </div>
 
             <section className="panel loyalty" aria-labelledby="loyalty-title">
@@ -99,9 +93,9 @@ export default async function DashboardPage() {
                 </>
             )}
 
-            <h2 className="section-title">Your posts</h2>
+            <h2 className="section-title">Your cats</h2>
             {posts.length === 0 ? (
-                <p className="muted">You haven’t posted a roast yet. <Link href="/spot">Make one</Link>.</p>
+                <p className="muted">You haven’t posted a cat yet. <Link href="/spot">Make one</Link>.</p>
             ) : (
                 <section className="grid">
                     {posts.map((p) => (
